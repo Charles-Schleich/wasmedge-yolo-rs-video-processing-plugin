@@ -1,0 +1,3 @@
+[build]
+# default target
+target = "wasm32-wasi"

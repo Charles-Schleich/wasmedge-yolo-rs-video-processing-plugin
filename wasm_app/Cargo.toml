@@ -1,0 +1,15 @@
+[package]
+edition = "2021"
+name = "wasm_app"
+version = "0.4.0"
+
+[dependencies]
+# libc = "0.2.148"
+
+# wasmedge-sdk = { version = "0.12.1" }
+
+# wasmedge-sdk = { version = "0.12.0", features = ["ffi", "standalone"] }
+
+# ffmpeg = { version = "0.6.0", features = [
+#     "ffmpeg_5_0",
+# ], git = "https://github.com/meh/rust-ffmpeg" }

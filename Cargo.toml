@@ -1,0 +1,4 @@
+[workspace]
+members = ["host_library", "wasm_app"]
+
+workspace.resolver = 2
