@@ -1,30 +1,32 @@
 mod plugin {
-    // use crate::MyStr;
-
-    // #[link(wasm_import_module = "yolo-video-proc")]
-    // extern "C" {
-    //     pub fn hello(a: String,x: String, y: MyStr) -> i32;
-    // }
-
     #[link(wasm_import_module = "yolo-video-proc")]
     extern "C" {
         pub fn proc_vec(ext_ptr: i32, buf_len: i32, capacity: i32) -> i32;
         pub fn proc_string(ext_ptr: i32, buf_len: i32, capacity: i32) -> i32;
-        // pub fn hello(a: i32,x: i32) -> i32;
-        // pub fn imencode(ext_ptr: *const u8, ext_len: usize, m: mat_key, buf_ptr: *const u8, buf_len: usize) -> ();
+        pub fn load_video(str_ptr: i32, str_len: i32, str_capacity: i32) -> i32;
+        pub fn proc_video(buf_ptr: i32, buf_len: i32, buf_capacity: i32) -> i32;
     }
 }
 
-// MyString is similar to Rust built-in String
-#[derive(Debug)]
-pub struct MyString {
-    pub s: String,
-}
+fn process_video(mut filename: String) -> Vec<image::DynamicImage> {
+    let num_frames = unsafe {
+        plugin::load_video(
+            filename.as_mut_ptr() as usize as i32,
+            filename.len() as i32,
+            filename.capacity() as i32,
+        )
+    };
+    println!("Woop woop {}",num_frames );
+    // let mut images = Vec::<image::DynamicImage>::with_capacity(num_frames as usize);
 
-// MyStr is similar to Rust built-in string slice, namely str
-#[derive(Debug)]
-pub struct MyStr<'a> {
-    pub s: &'a str,
+    // let buf_len = images.len() as i32;
+    // let buf_capacity = images.capacity() as i32;
+    // let buf_ptr_raw = images.as_mut_ptr() as usize as i32;
+
+    // let x = unsafe { plugin::proc_video(buf_ptr_raw, buf_len, buf_capacity) };
+    // images should contain the images here. 
+
+    todo!();
 }
 
 fn call_proc_vec() {
@@ -35,7 +37,6 @@ fn call_proc_vec() {
     println!("Before Function Call '{:?}'", buf);
     let y = unsafe { plugin::proc_vec(buf_ptr_raw, buf_len, buf_capacity) };
     println!("After Function Call '{:?}'", buf);
-
 }
 
 fn call_proc_string() {
@@ -53,11 +54,9 @@ fn call_proc_string() {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // println!("Call Proc String");
-    // call_proc_string();
-
     println!("Call Proc Vec");
-    call_proc_vec();
+    // call_proc_vec();
+    process_video("times_square.mp4".to_string());
 
     Ok(())
 }

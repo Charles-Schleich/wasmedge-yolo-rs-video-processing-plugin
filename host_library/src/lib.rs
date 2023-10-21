@@ -1,7 +1,9 @@
 use std::io::Write;
 
+mod dump_frames;
+
 use wasmedge_sdk::{
-    error::{HostFuncError, PluginError},
+    error::HostFuncError,
     host_function,
     plugin::{ffi, PluginDescriptor, PluginModuleBuilder, PluginVersion},
     Caller, NeverType, WasmValue,
@@ -56,6 +58,34 @@ fn proc_string(_caller: Caller, args: Vec<WasmValue>) -> Result<Vec<WasmValue>, 
     Ok(vec![WasmValue::from_i32(0)])
 }
 
+#[host_function]
+fn load_video(_caller: Caller, args: Vec<WasmValue>) -> Result<Vec<WasmValue>, HostFuncError> {
+    println!("load_video_into_ffmpeg");
+    let mut main_memory = _caller.memory(0).unwrap();
+
+    let data_ptr = args[0].to_i32();
+    let data_len = args[1].to_i32();
+    let data_capacity = args[2].to_i32();
+
+    println!("Main Memory");
+    let pointer = main_memory
+        .data_pointer_mut(data_ptr as u32, data_len as u32)
+        .expect("Could not get Data pointer");
+
+    let filename =
+        unsafe { String::from_raw_parts(pointer, data_len as usize, data_capacity as usize) };
+
+    println!("Calling FFMPEG dump Frames");
+
+    let res = match dump_frames::dump_frames(&filename) {
+        Ok(frames) => Ok(vec![WasmValue::from_i32(frames)]),
+        Err(err) => Err(HostFuncError::User(1)),
+    };
+    
+    std::mem::forget(filename); // Need to forget x otherwise we get a double free
+    res
+}
+
 /// Defines Plugin module instance
 unsafe extern "C" fn create_test_module(
     _arg1: *const ffi::WasmEdge_ModuleDescriptor,
@@ -67,6 +97,8 @@ unsafe extern "C" fn create_test_module(
         .with_func::<(i32, i32, i32), i32, NeverType>("proc_vec", proc_vec, None)
         .expect("failed to create host function")
         .with_func::<(i32, i32, i32), i32, NeverType>("proc_string", proc_string, None)
+        .expect("failed to create host function")
+        .with_func::<(i32, i32, i32), i32, NeverType>("load_video", load_video, None)
         .expect("failed to create host function")
         .build(module_name)
         .expect("failed to create plugin module");
