@@ -1,4 +1,4 @@
-use std::{env, fs::File, io::prelude::*};
+use std::{fs::File, io::prelude::*};
 
 use ffmpeg::{
     format::{input, Pixel},
@@ -7,10 +7,13 @@ use ffmpeg::{
     util::frame::video::Video,
 };
 
-pub fn dump_frames(filename: &String) -> Result<i32, ffmpeg::Error> {
+use crate::Frames;
+
+pub fn dump_frames(filename: &String) -> Result<Frames, ffmpeg::Error> {
     ffmpeg::init().unwrap();
 
     let mut frame_index = 0;
+    let mut frames = Vec::new();
 
     if let Ok(mut ictx) = input(filename) {
         let input = ictx
@@ -38,6 +41,7 @@ pub fn dump_frames(filename: &String) -> Result<i32, ffmpeg::Error> {
                     let mut rgb_frame = Video::empty();
                     scaler.run(&decoded, &mut rgb_frame)?;
                     // save_file(&rgb_frame, frame_index).unwrap();
+                    frames.push(rgb_frame);
                     frame_index += 1;
                 }
                 Ok(())
@@ -54,10 +58,10 @@ pub fn dump_frames(filename: &String) -> Result<i32, ffmpeg::Error> {
         receive_and_process_decoded_frames(&mut decoder)?;
     }
 
-    Ok(frame_index)
+    Ok(frames)
 }
 
-fn save_file(frame: &Video, index: usize) -> std::result::Result<(), std::io::Error> {
+pub fn save_file(frame: &Video, index: usize) -> std::result::Result<(), std::io::Error> {
     let mut file = File::create(format!("frame{}.ppm", index))?;
     file.write_all(format!("P6\n{} {}\n255\n", frame.width(), frame.height()).as_bytes())?;
     file.write_all(frame.data(0))?;

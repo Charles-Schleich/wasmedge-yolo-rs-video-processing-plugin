@@ -513,6 +513,7 @@ name = "host_library"
 version = "0.1.0"
 dependencies = [
  "ffmpeg",
+ "image",
  "wasmedge-sdk",
 ]
 

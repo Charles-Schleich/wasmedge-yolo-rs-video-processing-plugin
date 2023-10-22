@@ -5,6 +5,7 @@ mod plugin {
         pub fn proc_string(ext_ptr: i32, buf_len: i32, capacity: i32) -> i32;
         pub fn load_video(str_ptr: i32, str_len: i32, str_capacity: i32) -> i32;
         pub fn proc_video(buf_ptr: i32, buf_len: i32, buf_capacity: i32) -> i32;
+        pub fn get_frame(frame_index: i32, frame_ptr: i32) -> i32;
     }
 }
 
@@ -16,15 +17,37 @@ fn process_video(mut filename: String) -> Vec<image::DynamicImage> {
             filename.capacity() as i32,
         )
     };
-    println!("Woop woop {}",num_frames );
-    // let mut images = Vec::<image::DynamicImage>::with_capacity(num_frames as usize);
 
+    // let num_frames = unsafe {
+    //     plugin::load_video(
+    //         filename.as_mut_ptr() as usize as i32,
+    //         filename.len() as i32,
+    //         filename.capacity() as i32,
+    //     )
+    // };
+
+    println!("Woop woop {}", num_frames);
+    let mut frame = "10".to_string();
+
+    for idx in 0..num_frames {
+        println!("------ Run for frame {}", idx);
+
+        unsafe {
+            plugin::get_frame(
+                idx,
+                frame.as_mut_ptr() as usize as i32,
+            )
+        };
+        println!("------ Run for frame {}", idx);
+    }
+
+    // let mut images = Vec::<image::DynamicImage>::with_capacity(num_frames as usize);
     // let buf_len = images.len() as i32;
     // let buf_capacity = images.capacity() as i32;
     // let buf_ptr_raw = images.as_mut_ptr() as usize as i32;
 
     // let x = unsafe { plugin::proc_video(buf_ptr_raw, buf_len, buf_capacity) };
-    // images should contain the images here. 
+    // images should contain the images here.
 
     todo!();
 }
@@ -56,7 +79,9 @@ fn call_proc_string() {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Call Proc Vec");
     // call_proc_vec();
-    process_video("times_square.mp4".to_string());
+    process_video("./times_square.mp4".to_string());
+    // process_video("./demo_video/out.mp4".to_string());
+    // process_video("./demo_video/out_YUV.mp4".to_string());
 
     Ok(())
 }
