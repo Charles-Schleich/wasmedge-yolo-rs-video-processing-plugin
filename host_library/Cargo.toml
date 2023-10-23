@@ -8,6 +8,7 @@ edition = "2021"
 crate-type = ["rlib", "cdylib"]
 
 [dependencies]
+log = "0.4.20"
 wasmedge-sdk = { version = "0.12.1", features = ["ffi", "standalone"] }
 ffmpeg = { version = "0.6.0", features = [
     "ffmpeg_5_0",

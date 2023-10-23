@@ -1,11 +1,12 @@
 use std::{
     io::Write,
-    sync::{Arc, Mutex, RwLock},
+    sync::{Arc, Mutex},
 };
 
 mod dump_frames;
 
 use ffmpeg::frame;
+
 use wasmedge_sdk::{
     error::HostFuncError,
     host_function,
@@ -13,9 +14,8 @@ use wasmedge_sdk::{
     Caller, NeverType, WasmValue,
 };
 
-// The host function takes two arguments of WasmValue type:
-// the first argument is a reference to MyString
-// the second argument is a reference to MyStr
+use log::debug;
+
 #[host_function]
 fn proc_vec(_caller: Caller, args: Vec<WasmValue>) -> Result<Vec<WasmValue>, HostFuncError> {
     println!("Proc Vec");
@@ -64,32 +64,49 @@ fn proc_string(_caller: Caller, args: Vec<WasmValue>) -> Result<Vec<WasmValue>, 
 
 #[host_function]
 fn load_video(
-    _caller: Caller,
+    caller: Caller,
     args: Vec<WasmValue>,
     data: &mut Arc<Mutex<Frames>>, // data: &mut Frames,
 ) -> Result<Vec<WasmValue>, HostFuncError> {
-    println!("load_video ====================");
-    // _caller.instance()
+    debug!("Load_video");
     let mut data_guard = data.lock().unwrap();
-    println!("Data Len {:?}", data_guard.len());
-    let mut main_memory = _caller.memory(0).unwrap();
+    let mut main_memory = caller.memory(0).unwrap();
 
-    let data_ptr = args[0].to_i32();
-    let data_len = args[1].to_i32();
-    let data_capacity = args[2].to_i32();
+    let filename_ptr = args[0].to_i32();
+    let filename_len = args[1].to_i32();
+    let filaname_capacity = args[2].to_i32();
 
-    println!("Main Memory");
-    let pointer = main_memory
-        .data_pointer_mut(data_ptr as u32, data_len as u32)
+    let width_ptr = args[3].to_i32() as *mut i32;
+    let height_ptr = args[4].to_i32() as *mut i32;
+
+    // TODO: Proper error handling with Expects
+    let width_ptr_main_memory = main_memory
+        .data_pointer_mut(width_ptr as u32, 1)
+        .expect("Could not get Data pointer") as *mut u32;
+    let height_ptr_main_memory = main_memory
+        .data_pointer_mut(height_ptr as u32, 1)
+        .expect("Could not get Data pointer") as *mut u32;
+    let filename_ptr_main_memory = main_memory
+        .data_pointer_mut(filename_ptr as u32, filename_len as u32)
         .expect("Could not get Data pointer");
 
-    let filename =
-        unsafe { String::from_raw_parts(pointer, data_len as usize, data_capacity as usize) };
+    let filename: String = unsafe {
+        String::from_raw_parts(
+            filename_ptr_main_memory,
+            filename_len as usize,
+            filaname_capacity as usize,
+        )
+    };
 
-    println!("Calling FFMPEG dump Frames");
-
+    debug!("Call FFMPEG dump Frames");
     let res = match dump_frames::dump_frames(&filename) {
         Ok(frames) => {
+            if frames.len() > 0 {
+                unsafe {
+                    *width_ptr_main_memory = frames[0].width();
+                    *height_ptr_main_memory = frames[0].height();
+                }
+            }
             *data_guard = frames;
             Ok(vec![WasmValue::from_i32(data_guard.len() as i32)])
         }
@@ -104,47 +121,46 @@ fn load_video(
 
 #[host_function]
 fn get_frame(
-    _caller: Caller,
+    caller: Caller,
     args: Vec<WasmValue>,
-    data: &mut Arc<Mutex<Frames>>,
+    data: &mut Arc<Mutex<VideoFrames>>,
 ) -> Result<Vec<WasmValue>, HostFuncError> {
-    println!("load_video_into_ffmpeg");
-    let idx = args[0].to_i32();
-    let frame_pointer = args[1].to_i32();
+    debug!("get_frame");
 
-    let mut data_guard = data.lock().unwrap();
-    println!("Data Len {:?}", data_guard.len());
+    let mut main_memory = caller.memory(0).unwrap();
+    let idx: i32 = args[0].to_i32();
+    let frame_ptr = args[1].to_i32();
+    let frame_len = args[2].to_i32();
 
-    if let Some(frame) = data_guard.get(idx as usize) {
-        println!("Frame Exists ! ");
-        println!(" {:?} ", frame.data(0));
-        println!(" width {:?} ", frame.width());
-        println!(" height {:?} ", frame.height());
-        // println!(" color_space {:?} ", frame.color_space());
-        // println!(" color_primaries {:?} ", frame.color_primaries());
-        // println!(" chroma_location {:?} ", frame.chroma_location());
-        // println!(" aspect_ratio {:?} ", frame.aspect_ratio());
-        // println!(" aspect_ratio {:?} ", frame.aspect_ratio());
+    let data_guard = data.lock().unwrap();
 
-        // println!(" color_primaries {:?} ", frame.());
-        // println!(" color_primaries {:?} ", frame.color_primaries());
-        // println!(" color_primaries {:?} ", frame.color_primaries());
+    let frame_ptr_main_memory = main_memory
+        .data_pointer_mut(frame_ptr as u32, frame_len as u32)
+        .expect("Could not get Data pointer");
 
-        // save_file();
-        let dump_frame = dump_frames::save_file(frame, idx as usize);
-        println!("DUMP FRAME OUT{:?}",dump_frame);
+    if let Some(frame) = data_guard.input_frames.get(idx as usize) {
+        let image_opt: Option<image::ImageBuffer<image::Rgb<u8>, &[u8]>> =
+            image::ImageBuffer::from_raw(frame.width(), frame.height(), frame.data(0));
 
-        // image::ImageBuffer::from_vec(width, height, buf)
-        // let x = image::ImageBuffer::from_raw(frame.width(), frame.height(), frame.data(0));
-        // let image = image::load_from_memory(frame.data(0));
-        // println!("Load Image from Bytes {:?}", image);
+        println!("data length {:?}", frame.data(0).len());
+
+        if let Some(image) = image_opt {
+            println!("Got image !");
+            todo!("Overwrite image data using pointer from WASM instance");
+        }
     } else {
-        println!("Frame DOES NOT Exist");
+        // TODO return Error
+        todo!("Return error if frame does not exist");
     };
 
     // std::mem::forget(filename); // Need to forget x otherwise we get a double free
     Ok(vec![WasmValue::from_i32(1)])
     // Ok(vec![])
+}
+
+struct VideoFrames {
+    input_frames: Frames,
+    output_frames: Frames,
 }
 
 type Frames = Vec<frame::Video>;
@@ -155,11 +171,17 @@ unsafe extern "C" fn create_test_module(
 ) -> *mut ffi::WasmEdge_ModuleInstanceContext {
     let module_name = "yolo-video-proc";
 
-    let frames: Frames = Vec::new();
-    let frames_arc = Box::new(Arc::new(Mutex::new(frames)));
-    // let frames_arc = Box::new(Arc::new(frames));
-    // type ShareFrames = Arc<Frames>;
-    type ShareFrames = Arc<Mutex<Frames>>;
+    let video_frames = VideoFrames {
+        input_frames: Vec::new(),
+        output_frames: Vec::new(),
+    };
+
+    let video_frames_arc = Box::new(Arc::new(Mutex::new(video_frames)));
+
+    // TODO Wrap i32's in Struct to avoid misuse / mixups
+    type ShareFrames = Arc<Mutex<VideoFrames>>;
+    type Width = i32;
+    type Height = i32;
 
     let plugin_module = PluginModuleBuilder::<NeverType>::new()
         // .with_func::<(ExternRef, ExternRef), i32, NeverType>("hello", hello, None)
@@ -167,13 +189,17 @@ unsafe extern "C" fn create_test_module(
         .expect("failed to create host function")
         .with_func::<(i32, i32, i32), i32, NeverType>("proc_string", proc_string, None)
         .expect("failed to create host function")
-        .with_func::<(i32, i32, i32), i32, ShareFrames>(
+        .with_func::<(i32, i32, i32, Width, Height), i32, ShareFrames>(
             "load_video",
             load_video,
-            Some(frames_arc.clone()),
+            Some(video_frames_arc.clone()),
         )
         .expect("failed to create host function")
-        .with_func::<(i32, i32), i32, ShareFrames>("get_frame", get_frame, Some(frames_arc.clone()))
+        .with_func::<(i32, i32, i32), i32, ShareFrames>(
+            "get_frame",
+            get_frame,
+            Some(video_frames_arc.clone()),
+        )
         .expect("failed to create host function")
         .build(module_name)
         .expect("failed to create plugin module");

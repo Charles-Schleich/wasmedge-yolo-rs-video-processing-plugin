@@ -1,7 +1,10 @@
 ## WasmEdge Yolo-rs Video Processing plugin 
 
-This is a small plugin developed to support video processing of [yolo-rs](https://github.com/Charles-Schleich/yolo-rs)
-Using FFMPEG for video processing. 
+> [!NOTE]  
+> This library is a work in progress and is likely to change
+
+This is a small plugin developed for the WasmEdge Runtime to support video processing of [yolo-rs](https://github.com/Charles-Schleich/yolo-rs)
+Using FFMPEG for native video processing. 
 
 Build `host_library` and `wasm_app` in separate terminals
 
