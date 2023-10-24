@@ -1,4 +1,5 @@
-use std::ops::Range;
+use image::{GenericImage, ImageBuffer, Rgb, RgbImage};
+use log::debug;
 
 mod plugin {
     use crate::{FramesCount, HostResultType};
@@ -17,17 +18,29 @@ mod plugin {
             height_ptr: *mut u32,
         ) -> FramesCount;
         pub fn get_image_meta_data(width: i32, height: i32, bytes_length: i32) -> HostResultType;
-        pub fn get_frame(frame_index: i32, frame_ptr: i32, frame_len: i32) -> i32;
+        pub fn get_frame(
+            frame_index: i32,
+            image_buf_ptr: i32,
+            image_buf_len: i32,
+            image_buf_capacity: i32,
+        ) -> i32;
     }
 }
 
 type FramesCount = i32;
 type HostResultType = i32; // Can correspond 0 to okay, and num>0 to the equivalent of an error enum
 
-fn process_video(mut filename: String) -> Vec<image::DynamicImage> {
+fn process_video(mut filename: String) -> Result<(), ()> {
     let (mut width, mut height): (u32, u32) = (0, 0);
     let width_ptr = std::ptr::addr_of_mut!(width);
     let height_ptr = std::ptr::addr_of_mut!(height);
+
+    let mut red_square = image::RgbImage::new(32, 32);
+    for x in 0..32 {
+        for y in 0..32 {
+            red_square.put_pixel(x, y, Rgb([255, 0, 0]));
+        }
+    }
 
     let num_frames = unsafe {
         plugin::load_video(
@@ -39,23 +52,35 @@ fn process_video(mut filename: String) -> Vec<image::DynamicImage> {
         )
     };
 
-    println!("WIDTH {}", width);
-    println!("HEIGHT {}", height);
+    let image_buf_size: usize = (width * height * 3) as usize;
+    debug!("WIDTH {}", width);
+    debug!("HEIGHT {}", height);
+    debug!("Number of Frames {}", num_frames);
 
-    println!("Woop woop {}", num_frames);
-    let mut frame = "10".to_string();
+    for idx in 0..num_frames {
+        debug!("------ Run for frame {}", idx);
+        let mut image_buf: Vec<u8> = vec![0; image_buf_size];
 
-    // for idx in 0..num_frames {
-    for idx in [0, 10, 20, 30, 40] {
-        println!("------ Run for frame {}", idx);
-        let frame_length = 100;
-        unsafe { plugin::get_frame(idx, frame.as_mut_ptr() as usize as i32, frame_length) };
-        todo!("Change Frame length");
-        println!("------ Run for frame {}", idx);
+        let buf_ptr_raw = image_buf.as_mut_ptr() as usize as i32;
+        let buf_len = image_buf.len() as i32;
+        let buf_capacity = image_buf.capacity() as i32;
+        debug!("WASM image_buf_ptr {:?}", buf_ptr_raw);
+        debug!("WASM image_buf_len {:?}", buf_len);
+        debug!("WASM image_buf_capacity {:?}", buf_capacity);
+        // GET
+        {
+            unsafe { plugin::get_frame(idx, buf_ptr_raw, buf_len, buf_capacity) };
+            let mut image_buf: ImageBuffer<image::Rgb<u8>, Vec<u8>> =
+                ImageBuffer::from_vec(width, height, image_buf).unwrap();
+            image_buf.copy_from(&red_square, 0, 0);
+            image_buf.save(format!("test{idx}.png"));
+            // unsafe { plugin::write_frame(idx, buf_ptr_raw, buf_len, buf_capacity) };
+        }
+
+        let name = format!("wasm_save{idx}.png");
     }
 
-    // let mut images = Vec::<image::DynamicImage>::with_capacity(num_frames as usize);
-    todo!();
+    Ok(())
 }
 
 fn call_proc_vec() {
@@ -63,7 +88,7 @@ fn call_proc_vec() {
     let buf_len = buf.len() as i32;
     let buf_capacity = buf.capacity() as i32;
     let buf_ptr_raw = buf.as_mut_ptr() as usize as i32;
-    println!("Before Function Call '{:?}'", buf);
+    println!("WASM VEC {:?}", buf);
     let y = unsafe { plugin::proc_vec(buf_ptr_raw, buf_len, buf_capacity) };
     println!("After Function Call '{:?}'", buf);
 }
@@ -83,15 +108,9 @@ fn call_proc_string() {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // process_video("./times_square.mp4".to_string());
-    // process_video("./dog.mp4".to_string());
-    process_video("./video.mp4".to_string());
-    // process_video("./demo_video/out.mp4".to_string());
-    // process_video("./demo_video/out_YUV.mp4".to_string());
-    // process_video("./green_vid.mp4".to_string());
-    // process_video("./RED_vid.mp4".to_string());
-    // process_video("./video_fixed.mp4".to_string());
-    // process_video("./small_Red.mp4".to_string());
+    // call_proc_vec();
+    process_video("./times_square.mp4".to_string()).unwrap();
+    // process_video("./video.mp4".to_string());
 
     Ok(())
 }

@@ -1,5 +1,6 @@
 use std::{
-    io::Write,
+    io::{Read, Write},
+    mem::size_of,
     sync::{Arc, Mutex},
 };
 
@@ -7,6 +8,7 @@ mod dump_frames;
 
 use ffmpeg::frame;
 
+use image::GenericImage;
 use wasmedge_sdk::{
     error::HostFuncError,
     host_function,
@@ -28,9 +30,10 @@ fn proc_vec(_caller: Caller, args: Vec<WasmValue>) -> Result<Vec<WasmValue>, Hos
         .expect("Could not get Data pointer");
 
     let mut vec = unsafe { Vec::from_raw_parts(pointer, buf_len, buf_capacity) };
+
     println!("Lib Vec {:?}", vec);
     vec[0] = 100;
-    vec[9] = 100;
+    // vec[9] = 100;
     println!("vec {:?}", vec);
     println!("vec {:?}", vec);
     std::mem::forget(vec); // Need to forget x otherwise we get a double free
@@ -129,33 +132,34 @@ fn get_frame(
 
     let mut main_memory = caller.memory(0).unwrap();
     let idx: i32 = args[0].to_i32();
-    let frame_ptr = args[1].to_i32();
-    let frame_len = args[2].to_i32();
+    let image_buf_ptr = args[1].to_i32();
+    let image_buf_len = args[2].to_i32() as usize;
+    let image_buf_capacity = args[3].to_i32() as usize;
 
     let data_guard = data.lock().unwrap();
 
-    let frame_ptr_main_memory = main_memory
-        .data_pointer_mut(frame_ptr as u32, frame_len as u32)
+    debug!("LIB image_buf_ptr {:?}", image_buf_ptr);
+    debug!("LIB image_buf_len {:?}", image_buf_len);
+    debug!("LIB image_buf_capacity {:?}", image_buf_capacity);
+    let image_ptr_wasm_memory = main_memory
+        .data_pointer_mut(image_buf_ptr as u32, image_buf_len as u32)
         .expect("Could not get Data pointer");
 
+    let mut vec =
+        unsafe { Vec::from_raw_parts(image_ptr_wasm_memory, image_buf_len, image_buf_capacity) };
+
     if let Some(frame) = data_guard.input_frames.get(idx as usize) {
-        let image_opt: Option<image::ImageBuffer<image::Rgb<u8>, &[u8]>> =
-            image::ImageBuffer::from_raw(frame.width(), frame.height(), frame.data(0));
-
-        println!("data length {:?}", frame.data(0).len());
-
-        if let Some(image) = image_opt {
-            println!("Got image !");
-            todo!("Overwrite image data using pointer from WASM instance");
-        }
+        debug!("LIB data {:?}", frame.data(0).len());
+        println!("copy_from_slice");
+        vec.copy_from_slice(frame.data(0));
+        println!("copy_from_slice");
     } else {
         // TODO return Error
         todo!("Return error if frame does not exist");
     };
 
-    // std::mem::forget(filename); // Need to forget x otherwise we get a double free
+    std::mem::forget(vec); // Need to forget x otherwise we get a double free
     Ok(vec![WasmValue::from_i32(1)])
-    // Ok(vec![])
 }
 
 struct VideoFrames {
@@ -195,7 +199,7 @@ unsafe extern "C" fn create_test_module(
             Some(video_frames_arc.clone()),
         )
         .expect("failed to create host function")
-        .with_func::<(i32, i32, i32), i32, ShareFrames>(
+        .with_func::<(i32, i32, i32, i32), i32, ShareFrames>(
             "get_frame",
             get_frame,
             Some(video_frames_arc.clone()),

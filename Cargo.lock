@@ -1653,6 +1653,7 @@ name = "wasm_app"
 version = "0.4.0"
 dependencies = [
  "image",
+ "log",
 ]
 
 [[package]]
