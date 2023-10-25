@@ -6,7 +6,7 @@ use std::{
 
 mod dump_frames;
 
-use ffmpeg::frame;
+use ffmpeg::{format::Pixel, frame};
 
 use image::GenericImage;
 use wasmedge_sdk::{
@@ -69,7 +69,7 @@ fn proc_string(_caller: Caller, args: Vec<WasmValue>) -> Result<Vec<WasmValue>, 
 fn load_video(
     caller: Caller,
     args: Vec<WasmValue>,
-    data: &mut Arc<Mutex<Frames>>, // data: &mut Frames,
+    data: &mut Arc<Mutex<VideoFrames>>, // data: &mut Frames,
 ) -> Result<Vec<WasmValue>, HostFuncError> {
     debug!("Load_video");
     let mut data_guard = data.lock().unwrap();
@@ -110,14 +110,23 @@ fn load_video(
                     *height_ptr_main_memory = frames[0].height();
                 }
             }
-            *data_guard = frames;
-            Ok(vec![WasmValue::from_i32(data_guard.len() as i32)])
+
+            // *(data_guard) = frames;
+            let mut vid_gaurd = (data_guard);
+            vid_gaurd.width = frames[0].width();
+            vid_gaurd.height = frames[0].height();
+            vid_gaurd.input_frames = frames;
+
+            println!("Data Len {:?}", vid_gaurd.input_frames.len());
+
+            Ok(vec![WasmValue::from_i32(
+                vid_gaurd.input_frames.len() as i32
+            )])
         }
         // TODO: Make Error more clear
         Err(err) => Err(HostFuncError::User(1)),
     };
 
-    println!("Data Len {:?}", data_guard.len());
     std::mem::forget(filename); // Need to forget x otherwise we get a double free
     res
 }
@@ -150,9 +159,7 @@ fn get_frame(
 
     if let Some(frame) = data_guard.input_frames.get(idx as usize) {
         debug!("LIB data {:?}", frame.data(0).len());
-        println!("copy_from_slice");
         vec.copy_from_slice(frame.data(0));
-        println!("copy_from_slice");
     } else {
         // TODO return Error
         todo!("Return error if frame does not exist");
@@ -162,12 +169,57 @@ fn get_frame(
     Ok(vec![WasmValue::from_i32(1)])
 }
 
+#[host_function]
+fn write_frame(
+    caller: Caller,
+    args: Vec<WasmValue>,
+    data: &mut Arc<Mutex<VideoFrames>>,
+) -> Result<Vec<WasmValue>, HostFuncError> {
+    debug!("write_frame");
+
+    let mut main_memory = caller.memory(0).unwrap();
+    let idx = args[0].to_i32() as usize;
+    let image_buf_ptr = args[1].to_i32();
+    let image_buf_len = args[2].to_i32() as usize;
+
+    let mut data_guard = data.lock().unwrap();
+
+    let image_ptr_wasm_memory = main_memory
+        .data_pointer_mut(image_buf_ptr as u32, image_buf_len as u32)
+        .expect("Could not get Data pointer");
+
+    let vec = unsafe {
+        Vec::from_raw_parts(
+            image_ptr_wasm_memory,
+            image_buf_len,
+            (data_guard.width * data_guard.height * 3) as usize,
+        )
+    };
+
+    let mut video_frame =
+        frame::Video::new(data_guard.pixel_format, data_guard.width, data_guard.height);
+    {
+        let data = video_frame.data_mut(0);
+        data.copy_from_slice(&vec);
+    }
+
+    println!("Writing Frame {idx}");
+    data_guard.output_frames.insert(idx, video_frame);
+
+    std::mem::forget(vec); // Need to forget x otherwise we get a double free
+    Ok(vec![WasmValue::from_i32(1)])
+}
+
 struct VideoFrames {
     input_frames: Frames,
     output_frames: Frames,
+    pixel_format: Pixel,
+    width: u32,
+    height: u32,
 }
 
 type Frames = Vec<frame::Video>;
+type ShareFrames = Arc<Mutex<VideoFrames>>;
 
 /// Defines Plugin module instance
 unsafe extern "C" fn create_test_module(
@@ -178,12 +230,15 @@ unsafe extern "C" fn create_test_module(
     let video_frames = VideoFrames {
         input_frames: Vec::new(),
         output_frames: Vec::new(),
+        pixel_format: Pixel::RGB24,
+        width: 0,
+        height: 0,
     };
 
     let video_frames_arc = Box::new(Arc::new(Mutex::new(video_frames)));
 
     // TODO Wrap i32's in Struct to avoid misuse / mixups
-    type ShareFrames = Arc<Mutex<VideoFrames>>;
+
     type Width = i32;
     type Height = i32;
 
@@ -198,13 +253,19 @@ unsafe extern "C" fn create_test_module(
             load_video,
             Some(video_frames_arc.clone()),
         )
-        .expect("failed to create host function")
+        .expect("failed to create load_video host function")
         .with_func::<(i32, i32, i32, i32), i32, ShareFrames>(
             "get_frame",
             get_frame,
             Some(video_frames_arc.clone()),
         )
-        .expect("failed to create host function")
+        .expect("failed to create get_frame host function")
+        .with_func::<(i32, i32, i32), i32, ShareFrames>(
+            "write_frame",
+            write_frame,
+            Some(video_frames_arc.clone()),
+        )
+        .expect("failed to create write_frame host function")
         .build(module_name)
         .expect("failed to create plugin module");
 

@@ -1,6 +1,7 @@
 use std::{fs::File, io::prelude::*};
 
 use ffmpeg::{
+    encoder,
     format::{input, Pixel},
     media::Type,
     software::scaling::{context::Context, flag::Flags},

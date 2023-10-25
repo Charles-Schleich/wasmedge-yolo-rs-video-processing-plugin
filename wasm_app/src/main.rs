@@ -24,6 +24,7 @@ mod plugin {
             image_buf_len: i32,
             image_buf_capacity: i32,
         ) -> i32;
+        pub fn write_frame(frame_index: i32, image_buf_ptr: i32, image_buf_len: i32) -> i32;
     }
 }
 
@@ -73,8 +74,8 @@ fn process_video(mut filename: String) -> Result<(), ()> {
             let mut image_buf: ImageBuffer<image::Rgb<u8>, Vec<u8>> =
                 ImageBuffer::from_vec(width, height, image_buf).unwrap();
             image_buf.copy_from(&red_square, 0, 0);
-            image_buf.save(format!("test{idx}.png"));
-            // unsafe { plugin::write_frame(idx, buf_ptr_raw, buf_len, buf_capacity) };
+            // image_buf.save(format!("test{idx}.png"));
+            unsafe { plugin::write_frame(idx, buf_ptr_raw, buf_len) };
         }
 
         let name = format!("wasm_save{idx}.png");
