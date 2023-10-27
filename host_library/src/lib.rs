@@ -3,10 +3,10 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-mod dump_frames;
+mod decode_video;
+mod encode_video;
 
-use dump_frames::{Height, VideoInfo, Width};
-use ffmpeg::{format::Pixel, frame, Codec};
+use ffmpeg::{dictionary, format::Pixel, frame, Codec, Rational};
 
 use wasmedge_sdk::{
     error::HostFuncError,
@@ -16,6 +16,59 @@ use wasmedge_sdk::{
 };
 
 use log::debug;
+
+#[derive(Copy, Clone)]
+pub struct Width(pub u32);
+#[derive(Copy, Clone)]
+pub struct Height(pub u32);
+#[derive(Copy, Clone)]
+pub struct AspectRatio(pub Rational);
+#[derive(Copy, Clone)]
+pub struct FrameRate(pub Option<Rational>);
+
+#[derive(Clone)]
+pub struct VideoInfo {
+    pub codec: Codec,
+    pub format: Pixel,
+    pub width: Width,
+    pub height: Height,
+    pub aspect_ratio: AspectRatio,
+    pub frame_rate: FrameRate,
+    pub input_stream_meta_data: dictionary::Owned,
+    pub itcx_number_streams: u32
+}
+
+impl VideoInfo {
+    pub fn new(
+        codec: Codec,
+        format: Pixel,
+        width: Width,
+        height: Height,
+        aspect_ratio: AspectRatio,
+        frame_rate: FrameRate,
+        input_stream_meta_data: dictionary::Owned,
+        itcx_number_streams:u32
+    ) -> Self {
+        VideoInfo {
+            codec,
+            format,
+            width,
+            height,
+            aspect_ratio,
+            frame_rate,
+            input_stream_meta_data,
+            itcx_number_streams,
+        }
+    }
+
+    pub fn width(&self) -> u32 {
+        self.width.0
+    }
+
+    pub fn height(&self) -> u32 {
+        self.height.0
+    }
+}
 
 #[host_function]
 fn proc_vec(_caller: Caller, args: Vec<WasmValue>) -> Result<Vec<WasmValue>, HostFuncError> {
@@ -102,7 +155,7 @@ fn load_video(
 
     debug!("Call FFMPEG dump Frames");
 
-    let res = match dump_frames::dump_frames(&filename) {
+    let res = match decode_video::dump_frames(&filename) {
         Ok((frames, video_info)) => {
             debug!("Input Frame Count {}", frames.len());
             if frames.len() > 0 {
@@ -222,7 +275,7 @@ fn write_frame(
 }
 
 #[host_function]
-fn assemble_video(
+fn assemble_output_frames_to_video(
     caller: Caller,
     args: Vec<WasmValue>,
     data: &mut Arc<Mutex<VideoFrames>>,
@@ -235,8 +288,9 @@ fn assemble_video(
     let filename_len = args[1].to_i32();
     let filaname_capacity = args[2].to_i32();
 
-    // TODO Proper Error Handling
-    let video_info = data_mg.video_info.unwrap();
+    // TODO Proper Error Handling 
+    // TODO remove clone
+    let video_info = data_mg.video_info.clone().unwrap();
 
     // TODO proper Handling of errors
     let filename_ptr_main_memory = main_memory
@@ -251,13 +305,24 @@ fn assemble_video(
         )
     };
 
-    let video_struct = &(*data_mg);
-    let frames = &video_struct.output_frames;
+    let video_struct = &mut (*data_mg);
+    let mut frames = &mut video_struct.output_frames;
 
-    dump_frames::encode_frames(&"output_Video.mp4".to_string(), frames, video_info);
+    let res = encode_video::encode_frames(&"output_Video.mp4".to_string(), &mut frames, video_info);
 
-    todo!("Impl Assemble");
+    match res {
+        Ok(ok) => {}
+        Err(err) => {
+            println!("Encode stream ERROR {:?}", err);
+        }
+    };
+
+    // println!("Encode stream Result {:?}",res.is_err());
+
+    // todo!("Impl Assemble");
     // std::mem::forget(vec); // Need to forget x otherwise we get a double free
+    std::mem::forget(filename); // Need to forget x otherwise we get a double free
+
     Ok(vec![WasmValue::from_i32(1)])
 }
 
@@ -289,6 +354,9 @@ unsafe extern "C" fn create_test_module(
 
     type Width = i32;
     type Height = i32;
+    type FileNamePtr = i32;
+    type FileNameLen = i32;
+    type FileNameCapacity = i32;
 
     let plugin_module = PluginModuleBuilder::<NeverType>::new()
         // .with_func::<(ExternRef, ExternRef), i32, NeverType>("hello", hello, None)
@@ -314,6 +382,12 @@ unsafe extern "C" fn create_test_module(
             Some(video_frames_arc.clone()),
         )
         .expect("failed to create write_frame host function")
+        .with_func::<(i32, i32, i32), i32, ShareFrames>(
+            "assemble_output_frames_to_video",
+            assemble_output_frames_to_video,
+            Some(video_frames_arc.clone()),
+        )
+        .expect("failed to create assemble_output_frames_to_video host function")
         .build(module_name)
         .expect("failed to create plugin module");
 

@@ -8,8 +8,9 @@ mod plugin {
     extern "C" {
         // Example functions
         pub fn proc_vec(ext_ptr: i32, buf_len: i32, capacity: i32) -> i32;
+
         pub fn proc_string(ext_ptr: i32, buf_len: i32, capacity: i32) -> i32;
-        //
+
         pub fn load_video(
             str_ptr: i32,
             str_len: i32,
@@ -17,14 +18,24 @@ mod plugin {
             width_ptr: *mut u32,
             height_ptr: *mut u32,
         ) -> FramesCount;
-        pub fn get_image_meta_data(width: i32, height: i32, bytes_length: i32) -> HostResultType;
+        
         pub fn get_frame(
             frame_index: i32,
             image_buf_ptr: i32,
             image_buf_len: i32,
             image_buf_capacity: i32,
         ) -> i32;
+
         pub fn write_frame(frame_index: i32, image_buf_ptr: i32, image_buf_len: i32) -> i32;
+
+        pub fn assemble_output_frames_to_video(
+            str_ptr: i32,
+            str_len: i32,
+            str_capacity: i32,
+        ) -> FramesCount;
+
+        pub fn get_image_meta_data(width: i32, height: i32, bytes_length: i32) -> HostResultType;
+
     }
 }
 
@@ -72,21 +83,28 @@ fn process_video(mut filename: String) -> Result<(), ()> {
         debug!("WASM image_buf_ptr {:?}", buf_ptr_raw);
         debug!("WASM image_buf_len {:?}", buf_len);
         debug!("WASM image_buf_capacity {:?}", buf_capacity);
-        // GET
 
         {
             unsafe { plugin::get_frame(idx, buf_ptr_raw, buf_len, buf_capacity) };
             let mut image_buf: ImageBuffer<image::Rgb<u8>, Vec<u8>> =
                 ImageBuffer::from_vec(width, height, image_buf).unwrap();
             image_buf.copy_from(&red_square, 0, 0);
-            // image_buf.save(format!("test{idx}.png"));
-            println!("WRITE FRAME ?",);
 
             unsafe { plugin::write_frame(idx, buf_ptr_raw, buf_len) };
         }
 
-        let name = format!("wasm_save{idx}.png");
     }
+
+    let mut output_filename: String = format!("video_output.mp4");
+    let num_frames = unsafe {
+        plugin::assemble_output_frames_to_video(
+            output_filename.as_mut_ptr() as usize as i32,
+            output_filename.len() as i32,
+            output_filename.capacity() as i32,
+        )
+    };
+
+
 
     Ok(())
 }
