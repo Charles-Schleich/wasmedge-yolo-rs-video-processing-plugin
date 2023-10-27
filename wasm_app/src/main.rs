@@ -32,6 +32,8 @@ type FramesCount = i32;
 type HostResultType = i32; // Can correspond 0 to okay, and num>0 to the equivalent of an error enum
 
 fn process_video(mut filename: String) -> Result<(), ()> {
+    println!("Start Proc Video");
+
     let (mut width, mut height): (u32, u32) = (0, 0);
     let width_ptr = std::ptr::addr_of_mut!(width);
     let height_ptr = std::ptr::addr_of_mut!(height);
@@ -58,6 +60,8 @@ fn process_video(mut filename: String) -> Result<(), ()> {
     debug!("HEIGHT {}", height);
     debug!("Number of Frames {}", num_frames);
 
+    println!("Start iter over frames: {}", num_frames);
+
     for idx in 0..num_frames {
         debug!("------ Run for frame {}", idx);
         let mut image_buf: Vec<u8> = vec![0; image_buf_size];
@@ -69,12 +73,15 @@ fn process_video(mut filename: String) -> Result<(), ()> {
         debug!("WASM image_buf_len {:?}", buf_len);
         debug!("WASM image_buf_capacity {:?}", buf_capacity);
         // GET
+
         {
             unsafe { plugin::get_frame(idx, buf_ptr_raw, buf_len, buf_capacity) };
             let mut image_buf: ImageBuffer<image::Rgb<u8>, Vec<u8>> =
                 ImageBuffer::from_vec(width, height, image_buf).unwrap();
             image_buf.copy_from(&red_square, 0, 0);
             // image_buf.save(format!("test{idx}.png"));
+            println!("WRITE FRAME ?",);
+
             unsafe { plugin::write_frame(idx, buf_ptr_raw, buf_len) };
         }
 

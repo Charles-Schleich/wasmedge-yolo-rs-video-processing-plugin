@@ -1,14 +1,13 @@
 use std::{
-    io::{Read, Write},
-    mem::size_of,
+    io::Write,
     sync::{Arc, Mutex},
 };
 
 mod dump_frames;
 
-use ffmpeg::{format::Pixel, frame};
+use dump_frames::{Height, VideoInfo, Width};
+use ffmpeg::{format::Pixel, frame, Codec};
 
-use image::GenericImage;
 use wasmedge_sdk::{
     error::HostFuncError,
     host_function,
@@ -102,8 +101,10 @@ fn load_video(
     };
 
     debug!("Call FFMPEG dump Frames");
+
     let res = match dump_frames::dump_frames(&filename) {
-        Ok(frames) => {
+        Ok((frames, video_info)) => {
+            debug!("Input Frame Count {}", frames.len());
             if frames.len() > 0 {
                 unsafe {
                     *width_ptr_main_memory = frames[0].width();
@@ -113,8 +114,7 @@ fn load_video(
 
             // *(data_guard) = frames;
             let mut vid_gaurd = (data_guard);
-            vid_gaurd.width = frames[0].width();
-            vid_gaurd.height = frames[0].height();
+            vid_gaurd.video_info = Some(video_info);
             vid_gaurd.input_frames = frames;
 
             println!("Data Len {:?}", vid_gaurd.input_frames.len());
@@ -150,6 +150,7 @@ fn get_frame(
     debug!("LIB image_buf_ptr {:?}", image_buf_ptr);
     debug!("LIB image_buf_len {:?}", image_buf_len);
     debug!("LIB image_buf_capacity {:?}", image_buf_capacity);
+    // TODO proper Handling of errors
     let image_ptr_wasm_memory = main_memory
         .data_pointer_mut(image_buf_ptr as u32, image_buf_len as u32)
         .expect("Could not get Data pointer");
@@ -182,8 +183,11 @@ fn write_frame(
     let image_buf_ptr = args[1].to_i32();
     let image_buf_len = args[2].to_i32() as usize;
 
-    let mut data_guard = data.lock().unwrap();
+    let mut data_mtx = data.lock().unwrap();
+    // TODO: Proper Error Handling Video info
+    let video_info = data_mtx.video_info.clone().unwrap();
 
+    // TODO proper Handling of errors
     let image_ptr_wasm_memory = main_memory
         .data_pointer_mut(image_buf_ptr as u32, image_buf_len as u32)
         .expect("Could not get Data pointer");
@@ -192,30 +196,76 @@ fn write_frame(
         Vec::from_raw_parts(
             image_ptr_wasm_memory,
             image_buf_len,
-            (data_guard.width * data_guard.height * 3) as usize,
+            (video_info.width() * video_info.height() * 3) as usize,
         )
     };
 
-    let mut video_frame =
-        frame::Video::new(data_guard.pixel_format, data_guard.width, data_guard.height);
+    println!(
+        "BUFFER SIZE {}",
+        video_info.width() * video_info.height() * 3
+    );
+    let mut video_frame = frame::Video::new(
+        ffmpeg::format::Pixel::RGB24,
+        video_info.width.0,
+        video_info.height.0,
+    );
     {
         let data = video_frame.data_mut(0);
         data.copy_from_slice(&vec);
     }
 
     println!("Writing Frame {idx}");
-    data_guard.output_frames.insert(idx, video_frame);
+    data_mtx.output_frames.insert(idx, video_frame);
 
     std::mem::forget(vec); // Need to forget x otherwise we get a double free
     Ok(vec![WasmValue::from_i32(1)])
 }
 
+#[host_function]
+fn assemble_video(
+    caller: Caller,
+    args: Vec<WasmValue>,
+    data: &mut Arc<Mutex<VideoFrames>>,
+) -> Result<Vec<WasmValue>, HostFuncError> {
+    debug!("assemble_video");
+    let mut data_mg = data.lock().unwrap();
+    let mut main_memory = caller.memory(0).unwrap();
+
+    let filename_ptr = args[0].to_i32();
+    let filename_len = args[1].to_i32();
+    let filaname_capacity = args[2].to_i32();
+
+    // TODO Proper Error Handling
+    let video_info = data_mg.video_info.unwrap();
+
+    // TODO proper Handling of errors
+    let filename_ptr_main_memory = main_memory
+        .data_pointer_mut(filename_ptr as u32, filename_len as u32)
+        .expect("Could not get Data pointer");
+
+    let filename: String = unsafe {
+        String::from_raw_parts(
+            filename_ptr_main_memory,
+            filename_len as usize,
+            filaname_capacity as usize,
+        )
+    };
+
+    let video_struct = &(*data_mg);
+    let frames = &video_struct.output_frames;
+
+    dump_frames::encode_frames(&"output_Video.mp4".to_string(), frames, video_info);
+
+    todo!("Impl Assemble");
+    // std::mem::forget(vec); // Need to forget x otherwise we get a double free
+    Ok(vec![WasmValue::from_i32(1)])
+}
+
+#[derive(Clone)]
 struct VideoFrames {
     input_frames: Frames,
     output_frames: Frames,
-    pixel_format: Pixel,
-    width: u32,
-    height: u32,
+    video_info: Option<VideoInfo>,
 }
 
 type Frames = Vec<frame::Video>;
@@ -230,9 +280,7 @@ unsafe extern "C" fn create_test_module(
     let video_frames = VideoFrames {
         input_frames: Vec::new(),
         output_frames: Vec::new(),
-        pixel_format: Pixel::RGB24,
-        width: 0,
-        height: 0,
+        video_info: None,
     };
 
     let video_frames_arc = Box::new(Arc::new(Mutex::new(video_frames)));
