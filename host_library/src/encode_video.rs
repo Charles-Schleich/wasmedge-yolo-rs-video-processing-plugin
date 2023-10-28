@@ -1,10 +1,11 @@
 use std::{fs::File, io::prelude::*};
 
 use ffmpeg::{
+    codec,
     format::{self},
     frame,
     util::frame::video::Video,
-    Dictionary, Packet, Rational, codec,
+    Dictionary, Packet, Rational,
 };
 
 use crate::{Frames, VideoInfo};
@@ -22,30 +23,44 @@ pub fn encode_frames(
     let global_header = octx.format().flags().contains(format::Flags::GLOBAL_HEADER);
     let mut ost = octx.add_stream()?;
 
-    let mut encoder = ffmpeg::codec::Encoder::new(v_info.codec)?.video()?;
+    let codec = ffmpeg::encoder::find(codec::Id::H264).unwrap();
+
+    println!("ENCODER CODEC : {:?}", codec.name());
+
+    let mut encoder = ffmpeg::codec::Encoder::new(codec)?.video()?;
+    println!("INIT encoder");
+
     encoder.set_height(v_info.height.0);
     encoder.set_width(v_info.width.0);
     encoder.set_aspect_ratio(v_info.aspect_ratio.0);
     encoder.set_format(v_info.format);
     encoder.set_frame_rate(v_info.frame_rate.0);
     encoder.set_time_base(Some(v_info.frame_rate.0.unwrap().invert()));
+    println!("END INIT encoder");
 
     let mut dict = Dictionary::new();
     dict.set("preset", "medium");
     let ost_time_base = Rational(0, 0);
 
+    println!("Start Open with encoder");
     let mut encoder: ffmpeg::encoder::Video = encoder
         .open_with(dict)
         .expect("error opening libx264 encoder with supplied settings");
+    println!("END Open with encoder");
+
+    ost.set_parameters(encoder.parameters());
     // let ost_time_base = ost_time_bases[ost_index as usize];
 
     if global_header {
         encoder.set_flags(codec::Flags::GLOBAL_HEADER);
     }
 
+    println!("==========================");
+    println!("Write output context");
     octx.set_metadata(v_info.input_stream_meta_data);
     format::context::output::dump(&octx, 0, Some(&output_file));
     octx.write_header().unwrap();
+    println!("==========================");
 
     for (ost_index, _) in octx.streams().enumerate() {
         println!(

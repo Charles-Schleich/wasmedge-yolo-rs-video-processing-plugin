@@ -18,7 +18,7 @@ mod plugin {
             width_ptr: *mut u32,
             height_ptr: *mut u32,
         ) -> FramesCount;
-        
+
         pub fn get_frame(
             frame_index: i32,
             image_buf_ptr: i32,
@@ -72,7 +72,6 @@ fn process_video(mut filename: String) -> Result<(), ()> {
     debug!("Number of Frames {}", num_frames);
 
     println!("Start iter over frames: {}", num_frames);
-
     for idx in 0..num_frames {
         debug!("------ Run for frame {}", idx);
         let mut image_buf: Vec<u8> = vec![0; image_buf_size];
@@ -92,8 +91,8 @@ fn process_video(mut filename: String) -> Result<(), ()> {
 
             unsafe { plugin::write_frame(idx, buf_ptr_raw, buf_len) };
         }
-
     }
+    println!("Finished Writing Frames {:?}", num_frames);
 
     let mut output_filename: String = format!("video_output.mp4");
     let num_frames = unsafe {
@@ -103,8 +102,6 @@ fn process_video(mut filename: String) -> Result<(), ()> {
             output_filename.capacity() as i32,
         )
     };
-
-
 
     Ok(())
 }

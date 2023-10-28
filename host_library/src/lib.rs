@@ -35,7 +35,7 @@ pub struct VideoInfo {
     pub aspect_ratio: AspectRatio,
     pub frame_rate: FrameRate,
     pub input_stream_meta_data: dictionary::Owned,
-    pub itcx_number_streams: u32
+    pub itcx_number_streams: u32,
 }
 
 impl VideoInfo {
@@ -47,7 +47,7 @@ impl VideoInfo {
         aspect_ratio: AspectRatio,
         frame_rate: FrameRate,
         input_stream_meta_data: dictionary::Owned,
-        itcx_number_streams:u32
+        itcx_number_streams: u32,
     ) -> Self {
         VideoInfo {
             codec,
@@ -253,7 +253,7 @@ fn write_frame(
         )
     };
 
-    println!(
+    debug!(
         "BUFFER SIZE {}",
         video_info.width() * video_info.height() * 3
     );
@@ -267,7 +267,7 @@ fn write_frame(
         data.copy_from_slice(&vec);
     }
 
-    println!("Writing Frame {idx}");
+    debug!("Writing Frame {idx}");
     data_mtx.output_frames.insert(idx, video_frame);
 
     std::mem::forget(vec); // Need to forget x otherwise we get a double free
@@ -288,7 +288,7 @@ fn assemble_output_frames_to_video(
     let filename_len = args[1].to_i32();
     let filaname_capacity = args[2].to_i32();
 
-    // TODO Proper Error Handling 
+    // TODO Proper Error Handling
     // TODO remove clone
     let video_info = data_mg.video_info.clone().unwrap();
 

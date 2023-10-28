@@ -4,7 +4,8 @@ use ffmpeg::{
     frame,
     media::Type,
     software::scaling::{context::Context, flag::Flags},
-    util::frame::video::Video, Rational,
+    util::frame::video::Video,
+    Rational,
 };
 
 use crate::{AspectRatio, FrameRate, Frames, Height, VideoInfo, Width};
@@ -18,17 +19,16 @@ pub fn dump_frames(filename: &String) -> Result<(Frames, VideoInfo), ffmpeg::Err
     let input = input(filename);
     let (width, height, aspect_ratio, frame_rate, format);
     let input_stream_meta_data: dictionary::Owned;
-	let ost_time_bases;
+    let ost_time_bases;
     let itcx_number_streams;
 
     match input {
         Ok(mut ictx) => {
-
             let input = ictx
                 .streams()
                 .best(Type::Video)
                 .ok_or(ffmpeg::Error::StreamNotFound)?;
-            itcx_number_streams =ictx.nb_streams();
+            itcx_number_streams = ictx.nb_streams();
 
             ost_time_bases = vec![Rational(0, 0); ictx.nb_streams() as _];
 
@@ -96,7 +96,7 @@ pub fn dump_frames(filename: &String) -> Result<(Frames, VideoInfo), ffmpeg::Err
         aspect_ratio,
         frame_rate,
         input_stream_meta_data,
-        itcx_number_streams
+        itcx_number_streams,
     };
 
     Ok((frames, video_info))
