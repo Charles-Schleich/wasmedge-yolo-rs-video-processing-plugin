@@ -118,13 +118,13 @@ fn proc_string(_caller: Caller, args: Vec<WasmValue>) -> Result<Vec<WasmValue>, 
 }
 
 #[host_function]
-fn load_video(
+fn load_video_to_host_memory(
     caller: Caller,
     args: Vec<WasmValue>,
     data: &mut Arc<Mutex<VideoFrames>>, // data: &mut Frames,
 ) -> Result<Vec<WasmValue>, HostFuncError> {
     debug!("Load_video");
-    let mut data_guard = data.lock().unwrap();
+    let data_guard = data.lock().unwrap();
     let mut main_memory = caller.memory(0).unwrap();
 
     let filename_ptr = args[0].to_i32();
@@ -249,12 +249,15 @@ fn write_frame(
         Vec::from_raw_parts(
             image_ptr_wasm_memory,
             image_buf_len,
+            // (video_info.width() * video_info.height()) as usize,
             (video_info.width() * video_info.height() * 3) as usize,
         )
     };
 
     debug!(
+        // println!(
         "BUFFER SIZE {}",
+        // video_info.width() * video_info.height()
         video_info.width() * video_info.height() * 3
     );
     let mut video_frame = frame::Video::new(
@@ -262,12 +265,15 @@ fn write_frame(
         video_info.width.0,
         video_info.height.0,
     );
+
+    // println!("EISH {idx}");
+
     {
         let data = video_frame.data_mut(0);
         data.copy_from_slice(&vec);
     }
 
-    debug!("Writing Frame {idx}");
+    println!("Writing Frame {idx}");
     data_mtx.output_frames.insert(idx, video_frame);
 
     std::mem::forget(vec); // Need to forget x otherwise we get a double free
@@ -308,7 +314,11 @@ fn assemble_output_frames_to_video(
     let video_struct = &mut (*data_mg);
     let mut frames = &mut video_struct.output_frames;
 
-    let res = encode_video::encode_frames(&"output_Video.mp4".to_string(), &mut frames, video_info);
+    let res = encode_video::encode_frames(
+        &"output_Video_test_123.mp4".to_string(),
+        &mut frames,
+        video_info,
+    );
 
     match res {
         Ok(ok) => {}
@@ -351,12 +361,8 @@ unsafe extern "C" fn create_test_module(
     let video_frames_arc = Box::new(Arc::new(Mutex::new(video_frames)));
 
     // TODO Wrap i32's in Struct to avoid misuse / mixups
-
     type Width = i32;
     type Height = i32;
-    type FileNamePtr = i32;
-    type FileNameLen = i32;
-    type FileNameCapacity = i32;
 
     let plugin_module = PluginModuleBuilder::<NeverType>::new()
         // .with_func::<(ExternRef, ExternRef), i32, NeverType>("hello", hello, None)
@@ -365,11 +371,11 @@ unsafe extern "C" fn create_test_module(
         .with_func::<(i32, i32, i32), i32, NeverType>("proc_string", proc_string, None)
         .expect("failed to create host function")
         .with_func::<(i32, i32, i32, Width, Height), i32, ShareFrames>(
-            "load_video",
-            load_video,
+            "load_video_to_host_memory",
+            load_video_to_host_memory,
             Some(video_frames_arc.clone()),
         )
-        .expect("failed to create load_video host function")
+        .expect("failed to create load_video_to_host_memory host function")
         .with_func::<(i32, i32, i32, i32), i32, ShareFrames>(
             "get_frame",
             get_frame,

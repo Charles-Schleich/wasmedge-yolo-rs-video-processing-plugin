@@ -1,4 +1,4 @@
-use image::{GenericImage, ImageBuffer, Rgb, RgbImage};
+use image::{GenericImage, ImageBuffer, Rgb};
 use log::debug;
 
 mod plugin {
@@ -7,11 +7,8 @@ mod plugin {
     #[link(wasm_import_module = "yolo-video-proc")]
     extern "C" {
         // Example functions
-        pub fn proc_vec(ext_ptr: i32, buf_len: i32, capacity: i32) -> i32;
 
-        pub fn proc_string(ext_ptr: i32, buf_len: i32, capacity: i32) -> i32;
-
-        pub fn load_video(
+        pub fn load_video_to_host_memory(
             str_ptr: i32,
             str_len: i32,
             str_capacity: i32,
@@ -32,9 +29,7 @@ mod plugin {
             str_ptr: i32,
             str_len: i32,
             str_capacity: i32,
-        ) -> FramesCount;
-
-        pub fn get_image_meta_data(width: i32, height: i32, bytes_length: i32) -> HostResultType;
+        ) -> HostResultType;
 
     }
 }
@@ -57,7 +52,7 @@ fn process_video(mut filename: String) -> Result<(), ()> {
     }
 
     let num_frames = unsafe {
-        plugin::load_video(
+        plugin::load_video_to_host_memory(
             filename.as_mut_ptr() as usize as i32,
             filename.len() as i32,
             filename.capacity() as i32,
@@ -95,7 +90,7 @@ fn process_video(mut filename: String) -> Result<(), ()> {
     println!("Finished Writing Frames {:?}", num_frames);
 
     let mut output_filename: String = format!("video_output.mp4");
-    let num_frames = unsafe {
+    let output_code = unsafe {
         plugin::assemble_output_frames_to_video(
             output_filename.as_mut_ptr() as usize as i32,
             output_filename.len() as i32,
@@ -106,32 +101,9 @@ fn process_video(mut filename: String) -> Result<(), ()> {
     Ok(())
 }
 
-fn call_proc_vec() {
-    let mut buf: Vec<u8> = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-    let buf_len = buf.len() as i32;
-    let buf_capacity = buf.capacity() as i32;
-    let buf_ptr_raw = buf.as_mut_ptr() as usize as i32;
-    println!("WASM VEC {:?}", buf);
-    let y = unsafe { plugin::proc_vec(buf_ptr_raw, buf_len, buf_capacity) };
-    println!("After Function Call '{:?}'", buf);
-}
-
-fn call_proc_string() {
-    let mut s = "hello plugin".to_string();
-    println!("Before Function Call '{}'", s);
-    let y = unsafe {
-        plugin::proc_string(
-            s.as_mut_ptr() as usize as i32,
-            s.len() as i32,
-            s.capacity() as i32,
-        )
-    };
-    println!("After Function Call {}", s);
-    println!("Function Output {}", y);
-}
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // call_proc_vec();
+    // process_video("./ts_wide.mp4".to_string()).unwrap();
     process_video("./times_square.mp4".to_string()).unwrap();
     // process_video("./video.mp4".to_string());
 

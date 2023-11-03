@@ -2,19 +2,21 @@ use std::{fs::File, io::prelude::*};
 
 use ffmpeg::{
     codec,
-    format::{self},
+    format::{self, Pixel},
     frame,
+    software::scaling::{Context, Flags},
     util::frame::video::Video,
     Dictionary, Packet, Rational,
 };
 
-use crate::{Frames, VideoInfo};
+use crate::VideoInfo;
 
+// TODO Return Proper Error
 pub fn encode_frames(
     output_file: &String,
     frames: &mut Vec<frame::Video>,
     v_info: VideoInfo,
-) -> Result<Frames, ffmpeg::Error> {
+) -> Result<(), ffmpeg::Error> {
     // v_info.itcx_number_streams
     let mut ost_time_bases = vec![Rational(0, 0); v_info.itcx_number_streams as _];
 
@@ -48,10 +50,22 @@ pub fn encode_frames(
         .expect("error opening libx264 encoder with supplied settings");
     println!("END Open with encoder");
 
+    println!("==================");
+    println!("Encoder Parameters");
+    let enc_params = encoder.parameters();
+    println!("ist_params {:?}", enc_params.id());
+    println!("ist_params {:?}", enc_params.tag());
+    println!("ist_params {:?}", enc_params.medium());
+    println!("==================");
+
     ost.set_parameters(encoder.parameters());
     // let ost_time_base = ost_time_bases[ost_index as usize];
 
     if global_header {
+        println!(
+            "Setting Global header Flag : {:?}",
+            codec::Flags::GLOBAL_HEADER
+        );
         encoder.set_flags(codec::Flags::GLOBAL_HEADER);
     }
 
@@ -69,18 +83,26 @@ pub fn encode_frames(
         );
         ost_time_bases[ost_index] = octx.stream(ost_index as _).unwrap().time_base().unwrap();
     }
+    // panic!("Hello");
     println!("OST_TB ALL: {:?}", ost_time_bases);
     println!("=========");
 
     println!("Encoder : {:?}", v_info.codec.name());
 
-    receive_and_process_decoded_frames(frames, &mut octx, &mut encoder, ost_time_base);
+    receive_and_process_decoded_frames(
+        frames,
+        &mut octx,
+        &mut encoder,
+        *ost_time_bases.get(0).unwrap(),
+    );
 
-    // encoder.
-    // TODO:Continue from here
-    // ffmpeg::encoder::Video::
+    encoder.send_eof().unwrap();
 
-    todo!();
+    receive_and_process_encoded_packets(&mut encoder, 0, &mut octx, ost_time_base, ost_time_base);
+
+    octx.write_trailer().unwrap();
+
+    return Ok(());
 }
 
 fn receive_and_process_decoded_frames(
@@ -90,24 +112,33 @@ fn receive_and_process_decoded_frames(
     ost_time_base: Rational,
 ) {
     let mut frame_count = 0;
-    let decoder_time_base = ost_time_base;
     // Write Every Frame out to encoder packet
-    for (idx, mut frame) in frames.into_iter().enumerate() {
+
+    let mut scaler = Context::get(
+        Pixel::RGB24,
+        encoder.width(),
+        encoder.height(),
+        Pixel::YUV420P,
+        encoder.width(),
+        encoder.height(),
+        Flags::BILINEAR,
+    )
+    .unwrap();
+
+    for (idx, frame_rgb24) in frames.into_iter().enumerate() {
         frame_count += 1;
-        // let timestamp = frame.timestamp();
         let timestamp: Option<i64> = Some((idx * 1000) as i64);
-
         println!("Frame {idx} {:?}", timestamp);
-        println!("TS    {:?}", timestamp);
-        println!("OST T Base: {:?}", ost_time_base);
-        println!("Decoder T B: {:?}", decoder_time_base);
+        let mut frame_yuv420_p = Video::empty();
+        // let mut frame_yuv420_p = ffmpeg::util::frame::Frame::empty();
+        scaler.run(&frame_rgb24, &mut frame_yuv420_p).unwrap();
 
-        frame.set_pts(timestamp);
-        frame.set_kind(ffmpeg::picture::Type::None);
+        frame_yuv420_p.set_pts(timestamp);
+        frame_yuv420_p.set_kind(ffmpeg::picture::Type::None);
 
-        encoder.send_frame(frame).unwrap();
-
+        encoder.send_frame(&frame_yuv420_p).unwrap();
         // TODO SET PROPER STREAM INDEX
+        // TODO Fix time scale
         // CHECK USING OST BASE TIME
         receive_and_process_encoded_packets(encoder, 0, octx, ost_time_base, ost_time_base);
     }
@@ -131,7 +162,8 @@ fn receive_and_process_encoded_packets(
     }
 }
 
-pub fn save_file(frame: &Video, index: usize) -> std::result::Result<(), std::io::Error> {
+// TODO: Remove debug function
+pub fn _save_file(frame: &Video, index: usize) -> std::result::Result<(), std::io::Error> {
     let mut file = File::create(format!("frame{}.ppm", index))?;
     file.write_all(format!("P6\n{} {}\n255\n", frame.width(), frame.height()).as_bytes())?;
     file.write_all(frame.data(0))?;

@@ -68,7 +68,6 @@ pub fn dump_frames(filename: &String) -> Result<(Frames, VideoInfo), ffmpeg::Err
                     while decoder.receive_frame(&mut decoded).is_ok() {
                         let mut rgb_frame = Video::empty();
                         scaler.run(&decoded, &mut rgb_frame)?;
-                        // save_file(&rgb_frame, frame_index).unwrap();
                         frames.push(rgb_frame);
                         frame_index += 1;
                     }
