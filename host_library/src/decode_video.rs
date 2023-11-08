@@ -21,6 +21,7 @@ pub fn dump_frames(filename: &String) -> Result<(Frames, VideoInfo), ffmpeg::Err
     let input_stream_meta_data: dictionary::Owned;
     let ost_time_bases;
     let itcx_number_streams;
+    let decoder_time_base;
 
     match input {
         Ok(mut ictx) => {
@@ -37,6 +38,8 @@ pub fn dump_frames(filename: &String) -> Result<(Frames, VideoInfo), ffmpeg::Err
             input_stream_meta_data = ictx.metadata().to_owned();
 
             let mut decoder = input.decoder()?.video()?;
+            // TODO no Unwrap
+            decoder_time_base = decoder.time_base().unwrap();
 
             // TODO: Proper Error handling
             // codec = decoder.codec().unwrap();
@@ -96,6 +99,7 @@ pub fn dump_frames(filename: &String) -> Result<(Frames, VideoInfo), ffmpeg::Err
         frame_rate,
         input_stream_meta_data,
         itcx_number_streams,
+        decoder_time_base,
     };
 
     Ok((frames, video_info))

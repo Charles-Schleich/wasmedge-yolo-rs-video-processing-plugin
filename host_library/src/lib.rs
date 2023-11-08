@@ -15,15 +15,17 @@ use wasmedge_sdk::{
     Caller, NeverType, WasmValue,
 };
 
+use std::fmt::Debug;
+
 use log::debug;
 
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct Width(pub u32);
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct Height(pub u32);
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct AspectRatio(pub Rational);
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct FrameRate(pub Option<Rational>);
 
 #[derive(Clone)]
@@ -36,6 +38,22 @@ pub struct VideoInfo {
     pub frame_rate: FrameRate,
     pub input_stream_meta_data: dictionary::Owned,
     pub itcx_number_streams: u32,
+    pub decoder_time_base: Rational,
+}
+
+impl Debug for VideoInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VideoInfo")
+            .field("codec", &self.codec.name())
+            .field("format", &self.format)
+            .field("width", &self.width.0)
+            .field("height", &self.height.0)
+            .field("aspect_ratio", &self.aspect_ratio.0)
+            .field("frame_rate", &self.frame_rate.0)
+            .field("input_stream_meta_data", &self.input_stream_meta_data)
+            .field("itcx_number_streams", &self.itcx_number_streams)
+            .finish()
+    }
 }
 
 impl VideoInfo {
@@ -48,6 +66,7 @@ impl VideoInfo {
         frame_rate: FrameRate,
         input_stream_meta_data: dictionary::Owned,
         itcx_number_streams: u32,
+        decoder_time_base: Rational,
     ) -> Self {
         VideoInfo {
             codec,
@@ -58,6 +77,7 @@ impl VideoInfo {
             frame_rate,
             input_stream_meta_data,
             itcx_number_streams,
+            decoder_time_base,
         }
     }
 
@@ -166,7 +186,7 @@ fn load_video_to_host_memory(
             }
 
             // *(data_guard) = frames;
-            let mut vid_gaurd = (data_guard);
+            let mut vid_gaurd = data_guard;
             vid_gaurd.video_info = Some(video_info);
             vid_gaurd.input_frames = frames;
 
@@ -312,13 +332,13 @@ fn assemble_output_frames_to_video(
     };
 
     let video_struct = &mut (*data_mg);
-    let mut frames = &mut video_struct.output_frames;
+    let frames = &mut video_struct.output_frames;
+    let video_info = video_struct.video_info.clone().unwrap();
 
-    let res = encode_video::encode_frames(
-        &"output_Video_test_123.mp4".to_string(),
-        &mut frames,
-        video_info,
-    );
+    let output_file = "output_fileWOOPWOOP.mp4".into();
+    let mut video_encoder = encode_video::VideoEncoder::new(video_info, &output_file);
+
+    let res = video_encoder.receive_and_process_decoded_frames(frames);
 
     match res {
         Ok(ok) => {}
@@ -327,10 +347,6 @@ fn assemble_output_frames_to_video(
         }
     };
 
-    // println!("Encode stream Result {:?}",res.is_err());
-
-    // todo!("Impl Assemble");
-    // std::mem::forget(vec); // Need to forget x otherwise we get a double free
     std::mem::forget(filename); // Need to forget x otherwise we get a double free
 
     Ok(vec![WasmValue::from_i32(1)])
