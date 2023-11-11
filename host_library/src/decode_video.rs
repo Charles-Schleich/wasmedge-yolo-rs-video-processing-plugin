@@ -8,7 +8,7 @@ use ffmpeg::{
     Rational,
 };
 
-use crate::{AspectRatio, FrameRate, Frames, Height, VideoInfo, Width};
+use crate::{AspectRatio, BitRate, FrameRate, Frames, Height, MaxBitRate, VideoInfo, Width};
 
 pub fn dump_frames(filename: &String) -> Result<(Frames, VideoInfo), ffmpeg::Error> {
     ffmpeg::init().unwrap();
@@ -22,6 +22,7 @@ pub fn dump_frames(filename: &String) -> Result<(Frames, VideoInfo), ffmpeg::Err
     let ost_time_bases;
     let itcx_number_streams;
     let decoder_time_base;
+    let (bitrate, max_bitrate);
 
     match input {
         Ok(mut ictx) => {
@@ -45,10 +46,16 @@ pub fn dump_frames(filename: &String) -> Result<(Frames, VideoInfo), ffmpeg::Err
             // codec = decoder.codec().unwrap();
             codec = encoder::find(codec::Id::H264).unwrap();
 
-            println!("Decoder Codec {:?}", codec.name());
-            println!("Decoder Codec {:?}", codec.description());
+            println!("Decoder Codec");
+            println!("  BitRate {:?}", decoder.bit_rate());
+            println!("  MaxBitRate {:?}", decoder.max_bit_rate());
+            println!("  Codec");
+            println!("      Name  {:?}", codec.name());
+            println!("      Descr {:?}", codec.description());
 
             // I am wrapping these in Structs so its less likely that I make Type Errors
+            bitrate = BitRate(decoder.bit_rate());
+            max_bitrate = MaxBitRate(decoder.bit_rate());
             width = Width(decoder.width());
             height = Height(decoder.height());
             aspect_ratio = AspectRatio(decoder.aspect_ratio());
@@ -71,6 +78,12 @@ pub fn dump_frames(filename: &String) -> Result<(Frames, VideoInfo), ffmpeg::Err
                     while decoder.receive_frame(&mut decoded).is_ok() {
                         let mut rgb_frame = Video::empty();
                         scaler.run(&decoded, &mut rgb_frame)?;
+                        println!(
+                            "Read Frame {frame_index} : {:?} {:?} {:?} ",
+                            decoded.kind(),
+                            decoded.timestamp(),
+                            decoded.time_base()
+                        );
                         frames.push(rgb_frame);
                         frame_index += 1;
                     }
@@ -100,6 +113,8 @@ pub fn dump_frames(filename: &String) -> Result<(Frames, VideoInfo), ffmpeg::Err
         input_stream_meta_data,
         itcx_number_streams,
         decoder_time_base,
+        bitrate,
+        max_bitrate,
     };
 
     Ok((frames, video_info))

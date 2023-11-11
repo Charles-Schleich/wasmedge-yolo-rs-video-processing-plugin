@@ -16,7 +16,8 @@ Terminal 2:
 
 <!-- 
 Quick build
-cd wasm_app/ && cargo build --release && cd ../cd host_library/ && cargo build --release && cd .. 
+cd wasm_app/ && cargo build --release && cd ../ && cd host_library/ && cargo build --release && cd .. 
+
 -->
 
 #### To run:

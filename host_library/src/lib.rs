@@ -28,6 +28,11 @@ pub struct AspectRatio(pub Rational);
 #[derive(Debug, Copy, Clone)]
 pub struct FrameRate(pub Option<Rational>);
 
+#[derive(Debug, Copy, Clone)]
+pub struct BitRate(pub usize);
+#[derive(Debug, Copy, Clone)]
+pub struct MaxBitRate(pub usize);
+
 #[derive(Clone)]
 pub struct VideoInfo {
     pub codec: Codec,
@@ -39,6 +44,8 @@ pub struct VideoInfo {
     pub input_stream_meta_data: dictionary::Owned,
     pub itcx_number_streams: u32,
     pub decoder_time_base: Rational,
+    pub bitrate: BitRate,
+    pub max_bitrate: MaxBitRate,
 }
 
 impl Debug for VideoInfo {
@@ -67,6 +74,8 @@ impl VideoInfo {
         input_stream_meta_data: dictionary::Owned,
         itcx_number_streams: u32,
         decoder_time_base: Rational,
+        bitrate: BitRate,
+        max_bitrate: MaxBitRate,
     ) -> Self {
         VideoInfo {
             codec,
@@ -78,6 +87,8 @@ impl VideoInfo {
             input_stream_meta_data,
             itcx_number_streams,
             decoder_time_base,
+            bitrate,
+            max_bitrate,
         }
     }
 
@@ -323,7 +334,7 @@ fn assemble_output_frames_to_video(
         .data_pointer_mut(filename_ptr as u32, filename_len as u32)
         .expect("Could not get Data pointer");
 
-    let filename: String = unsafe {
+    let output_file: String = unsafe {
         String::from_raw_parts(
             filename_ptr_main_memory,
             filename_len as usize,
@@ -335,7 +346,6 @@ fn assemble_output_frames_to_video(
     let frames = &mut video_struct.output_frames;
     let video_info = video_struct.video_info.clone().unwrap();
 
-    let output_file = "output_fileWOOPWOOP.mp4".into();
     let mut video_encoder = encode_video::VideoEncoder::new(video_info, &output_file);
 
     let res = video_encoder.receive_and_process_decoded_frames(frames);
@@ -347,7 +357,7 @@ fn assemble_output_frames_to_video(
         }
     };
 
-    std::mem::forget(filename); // Need to forget x otherwise we get a double free
+    std::mem::forget(output_file); // Need to forget x otherwise we get a double free
 
     Ok(vec![WasmValue::from_i32(1)])
 }

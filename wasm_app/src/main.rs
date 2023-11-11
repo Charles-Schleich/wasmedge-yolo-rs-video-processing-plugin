@@ -45,9 +45,12 @@ fn process_video(mut filename: String) -> Result<(), ()> {
     let height_ptr = std::ptr::addr_of_mut!(height);
 
     let mut red_square = image::RgbImage::new(32, 32);
+    let mut blue_square = image::RgbImage::new(32, 32);
     for x in 0..32 {
         for y in 0..32 {
             red_square.put_pixel(x, y, Rgb([255, 0, 0]));
+            blue_square.put_pixel(x, y, Rgb([0, 0, 255]));
+            // red_square.put_pixel(x, y, Rgb([255, 0, 0]));
         }
     }
 
@@ -82,14 +85,20 @@ fn process_video(mut filename: String) -> Result<(), ()> {
             unsafe { plugin::get_frame(idx, buf_ptr_raw, buf_len, buf_capacity) };
             let mut image_buf: ImageBuffer<image::Rgb<u8>, Vec<u8>> =
                 ImageBuffer::from_vec(width, height, image_buf).unwrap();
-            image_buf.copy_from(&red_square, 0, 0);
+            let res_r = image_buf.copy_from(&red_square, 0, 0);
+            let res_b = image_buf.copy_from(&blue_square, 64, 64);
 
             unsafe { plugin::write_frame(idx, buf_ptr_raw, buf_len) };
         }
     }
     println!("Finished Writing Frames {:?}", num_frames);
 
-    let mut output_filename: String = format!("video_output.mp4");
+    // let mut output_filename: String = format!("video_output.mp4");
+    let mut out: Vec<&str> = filename.split(".").collect::<Vec<&str>>();
+    out.insert(0, "./");
+    out.insert(out.len() - 1, "_out.");
+    let mut output_filename = out.join("");
+    println!("Output Filename {}", output_filename);
     let output_code = unsafe {
         plugin::assemble_output_frames_to_video(
             output_filename.as_mut_ptr() as usize as i32,
@@ -102,10 +111,9 @@ fn process_video(mut filename: String) -> Result<(), ()> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // call_proc_vec();
     // process_video("./ts_wide.mp4".to_string()).unwrap();
-    process_video("./times_square.mp4".to_string()).unwrap();
-    // process_video("./video.mp4".to_string());
+    // process_video("./times_square.mp4".to_string()).unwrap();
+    process_video("small_bunny_1080p_60fps.mp4".to_string()).unwrap();
 
     Ok(())
 }

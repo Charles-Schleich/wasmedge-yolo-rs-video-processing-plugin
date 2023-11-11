@@ -32,6 +32,7 @@ impl VideoEncoder {
         let mut ost = octx.add_stream().unwrap();
 
         let codec = ffmpeg::encoder::find(codec::Id::H264).unwrap();
+        // libx264rgb
 
         println!("ENCODER CODEC : {:?}", codec.name());
 
@@ -44,30 +45,39 @@ impl VideoEncoder {
         encoder.set_width(v_info.width.0);
         encoder.set_aspect_ratio(v_info.aspect_ratio.0);
         encoder.set_format(v_info.format);
-        encoder.set_frame_rate(v_info.frame_rate.0);
-        encoder.set_time_base(Some(v_info.frame_rate.0.unwrap().invert()));
+        let frame_rate = v_info.frame_rate.0;
+        encoder.set_frame_rate(frame_rate);
+        encoder.set_time_base(frame_rate.map(|x| x.invert()));
+        encoder.set_bit_rate(v_info.bitrate.0);
+        encoder.set_max_bit_rate(v_info.max_bitrate.0);
+        // encoder.set_bit_rate(6021000);
+
+        // encoder->bit_rate = 400000;
+        // println!("Frame Rate {:?}", v_info.frame_rate.0);
+        // println!("Time Base {:?}", v_info.frame_rate.0.unwrap().invert());
+        // encoder.set_max_b_frames(1);
+        // Investigate more
+
         println!("END INIT encoder\n=======");
 
         let mut dict = Dictionary::new();
-        dict.set("preset", "medium");
-        let ost_time_base = Rational(0, 0);
+        dict.set("preset", "slow");
+        // dict.set("preset", "medium");
+        // dict.set("preset", "fast");
 
-        println!("Start Open with encoder");
+        // println!("Start Open with encoder");
         let mut encoder: ffmpeg::encoder::Video = encoder
             .open_with(dict)
             .expect("error opening libx264 encoder with supplied settings");
-        println!("END Open with encoder");
-        println!("END Open with encoder");
+        // println!("END Open with encoder");
 
         println!("==================");
         println!("Encoder Parameters");
         let enc_params = encoder.parameters();
-        println!("ist_params {:?}", enc_params.id());
-        println!("ist_params {:?}", enc_params.tag());
-        println!("ist_params {:?}", enc_params.medium());
+        println!("id : {:?}", enc_params.id());
+        println!("tag: {:?}", enc_params.tag());
+        println!("medium {:?}", enc_params.medium());
         println!("==================");
-
-        let ost_time_base = Rational(0, 0);
 
         ost.set_parameters(encoder.parameters());
         // let ost_time_base = ost_time_bases[ost_index as usize];
@@ -125,45 +135,52 @@ impl VideoEncoder {
         for (idx, frame_rgb24) in frames.into_iter().enumerate() {
             frame_count += 1;
             let timestamp: Option<i64> = Some((idx * 1000) as i64);
-            println!("Frame {idx} {:?}", timestamp);
+            // print!(" {idx} {:?} , ", timestamp);
             let mut frame_yuv420_p = Video::empty();
 
             scaler.run(&frame_rgb24, &mut frame_yuv420_p).unwrap();
 
-            frame_yuv420_p.set_pts(timestamp);
-            frame_yuv420_p.set_kind(ffmpeg::picture::Type::None);
-
+            // println!("SETTING PTS {:?}", timestamp);
+            frame_yuv420_p.set_pts(timestamp.map(|x| x / 2));
+            frame_yuv420_p.set_kind(ffmpeg::picture::Type::I);
+            // frame_yuv420_p.set_kind(ffmpeg::picture::Type::None);
+            // println!("SETTING PTS {:?}", timestamp);
+            // self.encoder.set_ds
             self.encoder.send_frame(&frame_yuv420_p).unwrap();
             // TODO SET PROPER STREAM INDEX
             // TODO Fix time scale
             // CHECK USING OST BASE TIME
-            self.receive_and_process_encoded_packets(0);
+            self.receive_and_process_encoded_packets(0, timestamp);
+            // last_frame= ids;
         }
 
         // Send End of file information to Encoder and Output Context
         self.encoder.send_eof().unwrap();
 
-        self.receive_and_process_encoded_packets(0);
+        self.receive_and_process_encoded_packets(0, Some((frame_count + 1) * 1000));
 
         self.octx.write_trailer().unwrap();
 
         return Ok(());
     }
 
-    fn receive_and_process_encoded_packets(&mut self, ost_index: usize) {
-        let mut encoded = Packet::empty();
-        while self.encoder.receive_packet(&mut encoded).is_ok() {
-            encoded.set_stream(ost_index);
+    fn receive_and_process_encoded_packets(&mut self, ost_index: usize, timestamp: Option<i64>) {
+        let mut encoded_packet = Packet::empty();
+        while self.encoder.receive_packet(&mut encoded_packet).is_ok() {
+            encoded_packet.set_stream(ost_index);
+            // encoded_packet.set_pts(timestamp);
+            // encoded_packet.set_dts(timestamp);
+            // encoded_packet.set_position(value);
+            // println!(
+            //     "rescale TS  SRC: {} - DST:{}",
+            //     self.decoder_time_base, self.ost_time_bases[ost_index]
+            // );
+            encoded_packet.rescale_ts(self.decoder_time_base, self.ost_time_bases[ost_index]);
 
-            println!(
-                "rescale TS  SRC: {} - DST:{}",
-                self.decoder_time_base, self.ost_time_bases[ost_index]
-            );
+            // encoded_packet.set_dts(value);
 
-            encoded.rescale_ts(self.decoder_time_base, self.ost_time_bases[ost_index]);
-
-            let write_interleaved = encoded.write_interleaved(&mut self.octx);
-
+            let write_interleaved = encoded_packet.write(&mut self.octx);
+            // let write_interleaved = encoded_packet.write_interleaved(&mut self.octx);
             if let Err(err) = write_interleaved {
                 println!("write_interleaved {:?}", err);
             };
