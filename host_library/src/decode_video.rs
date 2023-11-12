@@ -5,10 +5,11 @@ use ffmpeg::{
     media::Type,
     software::scaling::{context::Context, flag::Flags},
     util::frame::video::Video,
-    Rational,
 };
 
-use crate::{AspectRatio, BitRate, FrameRate, Frames, Height, MaxBitRate, VideoInfo, Width};
+use crate::{
+    AspectRatio, BitRate, FrameMap, FrameRate, Frames, Height, MaxBitRate, VideoInfo, Width,
+};
 
 pub fn dump_frames(filename: &String) -> Result<(Frames, VideoInfo), ffmpeg::Error> {
     ffmpeg::init().unwrap();
@@ -19,7 +20,7 @@ pub fn dump_frames(filename: &String) -> Result<(Frames, VideoInfo), ffmpeg::Err
     let input = input(filename);
     let (width, height, aspect_ratio, frame_rate, format);
     let input_stream_meta_data: dictionary::Owned;
-    let ost_time_bases;
+
     let itcx_number_streams;
     let decoder_time_base;
     let (bitrate, max_bitrate);
@@ -32,8 +33,6 @@ pub fn dump_frames(filename: &String) -> Result<(Frames, VideoInfo), ffmpeg::Err
                 .ok_or(ffmpeg::Error::StreamNotFound)?;
             itcx_number_streams = ictx.nb_streams();
 
-            ost_time_bases = vec![Rational(0, 0); ictx.nb_streams() as _];
-
             let video_stream_index: usize = input.index();
 
             input_stream_meta_data = ictx.metadata().to_owned();
@@ -43,7 +42,6 @@ pub fn dump_frames(filename: &String) -> Result<(Frames, VideoInfo), ffmpeg::Err
             decoder_time_base = decoder.time_base().unwrap();
 
             // TODO: Proper Error handling
-            // codec = decoder.codec().unwrap();
             codec = encoder::find(codec::Id::H264).unwrap();
 
             println!("Decoder Codec");
@@ -62,6 +60,7 @@ pub fn dump_frames(filename: &String) -> Result<(Frames, VideoInfo), ffmpeg::Err
             frame_rate = FrameRate(decoder.frame_rate());
             format = decoder.format();
 
+            // Scaler to convert YUV420 encoded frame -> RGB Raw frame
             let mut scaler = Context::get(
                 decoder.format(),
                 decoder.width(),
@@ -74,17 +73,26 @@ pub fn dump_frames(filename: &String) -> Result<(Frames, VideoInfo), ffmpeg::Err
 
             let mut receive_and_process_decoded_frames =
                 |decoder: &mut ffmpeg::decoder::Video| -> Result<(), ffmpeg::Error> {
-                    let mut decoded = frame::Video::empty();
-                    while decoder.receive_frame(&mut decoded).is_ok() {
+                    let mut decoded_frame = frame::Video::empty();
+                    while decoder.receive_frame(&mut decoded_frame).is_ok() {
                         let mut rgb_frame = Video::empty();
-                        scaler.run(&decoded, &mut rgb_frame)?;
+                        scaler.run(&decoded_frame, &mut rgb_frame)?;
                         println!(
-                            "Read Frame {frame_index} : {:?} {:?} {:?} ",
-                            decoded.kind(),
-                            decoded.timestamp(),
-                            decoded.time_base()
+                            "R_Frame {frame_index} : {:?} {:?} {:?} {:?} ",
+                            decoded_frame.kind(),
+                            decoded_frame.timestamp(),
+                            decoded_frame.duration(),
+                            decoded_frame.display_number()
                         );
-                        frames.push(rgb_frame);
+
+                        let frame_map = FrameMap {
+                            input_frame: rgb_frame,
+                            frame_type: decoded_frame.kind(),
+                            timestamp: decoded_frame.timestamp(),
+                            output_frame: None,
+                        };
+
+                        frames.push(frame_map);
                         frame_index += 1;
                     }
                     Ok(())

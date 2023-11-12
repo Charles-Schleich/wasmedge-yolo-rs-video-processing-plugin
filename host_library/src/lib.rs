@@ -6,7 +6,7 @@ use std::{
 mod decode_video;
 mod encode_video;
 
-use ffmpeg::{dictionary, format::Pixel, frame, Codec, Rational};
+use ffmpeg::{dictionary, format::Pixel, frame, picture, Codec, Rational};
 
 use wasmedge_sdk::{
     error::HostFuncError,
@@ -152,7 +152,7 @@ fn proc_string(_caller: Caller, args: Vec<WasmValue>) -> Result<Vec<WasmValue>, 
 fn load_video_to_host_memory(
     caller: Caller,
     args: Vec<WasmValue>,
-    data: &mut Arc<Mutex<VideoFrames>>, // data: &mut Frames,
+    data: &mut Arc<Mutex<FramesMap>>, // data: &mut Frames,
 ) -> Result<Vec<WasmValue>, HostFuncError> {
     debug!("Load_video");
     let data_guard = data.lock().unwrap();
@@ -191,21 +191,19 @@ fn load_video_to_host_memory(
             debug!("Input Frame Count {}", frames.len());
             if frames.len() > 0 {
                 unsafe {
-                    *width_ptr_main_memory = frames[0].width();
-                    *height_ptr_main_memory = frames[0].height();
+                    *width_ptr_main_memory = frames[0].input_frame.width();
+                    *height_ptr_main_memory = frames[0].input_frame.height();
                 }
             }
 
             // *(data_guard) = frames;
             let mut vid_gaurd = data_guard;
             vid_gaurd.video_info = Some(video_info);
-            vid_gaurd.input_frames = frames;
+            vid_gaurd.frames = frames;
 
-            println!("Data Len {:?}", vid_gaurd.input_frames.len());
+            println!("Data Len {:?}", vid_gaurd.frames.len());
 
-            Ok(vec![WasmValue::from_i32(
-                vid_gaurd.input_frames.len() as i32
-            )])
+            Ok(vec![WasmValue::from_i32(vid_gaurd.frames.len() as i32)])
         }
         // TODO: Make Error more clear
         Err(err) => Err(HostFuncError::User(1)),
@@ -219,7 +217,7 @@ fn load_video_to_host_memory(
 fn get_frame(
     caller: Caller,
     args: Vec<WasmValue>,
-    data: &mut Arc<Mutex<VideoFrames>>,
+    data: &mut Arc<Mutex<FramesMap>>,
 ) -> Result<Vec<WasmValue>, HostFuncError> {
     debug!("get_frame");
 
@@ -242,9 +240,9 @@ fn get_frame(
     let mut vec =
         unsafe { Vec::from_raw_parts(image_ptr_wasm_memory, image_buf_len, image_buf_capacity) };
 
-    if let Some(frame) = data_guard.input_frames.get(idx as usize) {
-        debug!("LIB data {:?}", frame.data(0).len());
-        vec.copy_from_slice(frame.data(0));
+    if let Some(frame) = data_guard.frames.get(idx as usize) {
+        debug!("LIB data {:?}", frame.input_frame.data(0).len());
+        vec.copy_from_slice(frame.input_frame.data(0));
     } else {
         // TODO return Error
         todo!("Return error if frame does not exist");
@@ -258,7 +256,7 @@ fn get_frame(
 fn write_frame(
     caller: Caller,
     args: Vec<WasmValue>,
-    data: &mut Arc<Mutex<VideoFrames>>,
+    data: &mut Arc<Mutex<FramesMap>>,
 ) -> Result<Vec<WasmValue>, HostFuncError> {
     debug!("write_frame");
 
@@ -280,24 +278,20 @@ fn write_frame(
         Vec::from_raw_parts(
             image_ptr_wasm_memory,
             image_buf_len,
-            // (video_info.width() * video_info.height()) as usize,
             (video_info.width() * video_info.height() * 3) as usize,
         )
     };
 
     debug!(
-        // println!(
         "BUFFER SIZE {}",
-        // video_info.width() * video_info.height()
         video_info.width() * video_info.height() * 3
     );
+
     let mut video_frame = frame::Video::new(
         ffmpeg::format::Pixel::RGB24,
         video_info.width.0,
         video_info.height.0,
     );
-
-    // println!("EISH {idx}");
 
     {
         let data = video_frame.data_mut(0);
@@ -305,17 +299,21 @@ fn write_frame(
     }
 
     println!("Writing Frame {idx}");
-    data_mtx.output_frames.insert(idx, video_frame);
+    if let Some(frame_map) = data_mtx.frames.get_mut(idx) {
+        frame_map.output_frame = Some(video_frame);
+    } else {
+        return Ok(vec![WasmValue::from_i32(1)]);
+    };
 
     std::mem::forget(vec); // Need to forget x otherwise we get a double free
-    Ok(vec![WasmValue::from_i32(1)])
+    Ok(vec![WasmValue::from_i32(0)])
 }
 
 #[host_function]
 fn assemble_output_frames_to_video(
     caller: Caller,
     args: Vec<WasmValue>,
-    data: &mut Arc<Mutex<VideoFrames>>,
+    data: &mut Arc<Mutex<FramesMap>>,
 ) -> Result<Vec<WasmValue>, HostFuncError> {
     debug!("assemble_video");
     let mut data_mg = data.lock().unwrap();
@@ -343,18 +341,32 @@ fn assemble_output_frames_to_video(
     };
 
     let video_struct = &mut (*data_mg);
-    let frames = &mut video_struct.output_frames;
+    let frames = &mut video_struct.frames;
     let video_info = video_struct.video_info.clone().unwrap();
+
+    // Check Frames have all been Written
+    // Save Indexes of frames that have not been written
+    let (frames, missing_frames) = frames.into_iter().enumerate().fold(
+        (Vec::new(), Vec::new()),
+        |(mut iter_frames, mut iter_missing), (idx, frame_map)| {
+            match frame_map.output_frame.as_mut() {
+                Some(fr) => iter_frames.push((fr, frame_map.frame_type, frame_map.timestamp)),
+                None => iter_missing.push(idx),
+            };
+            (iter_frames, iter_missing)
+        },
+    );
+
+    if missing_frames.len() > 0 {
+        // TODO: Return correct Error stating missing frames based on Error enum
+        println!("ERROR MISSING FRAMES {:?} ", missing_frames);
+        return Ok(vec![WasmValue::from_i32(1)]);
+    }
 
     let mut video_encoder = encode_video::VideoEncoder::new(video_info, &output_file);
 
-    let res = video_encoder.receive_and_process_decoded_frames(frames);
-
-    match res {
-        Ok(ok) => {}
-        Err(err) => {
-            println!("Encode stream ERROR {:?}", err);
-        }
+    if let Err(err) = video_encoder.receive_and_process_decoded_frames(frames) {
+        println!("Encode stream ERROR {:?}", err);
     };
 
     std::mem::forget(output_file); // Need to forget x otherwise we get a double free
@@ -363,14 +375,31 @@ fn assemble_output_frames_to_video(
 }
 
 #[derive(Clone)]
-struct VideoFrames {
-    input_frames: Frames,
-    output_frames: Frames,
+struct FramesMap {
+    frames: Frames,
     video_info: Option<VideoInfo>,
 }
 
-type Frames = Vec<frame::Video>;
-type ShareFrames = Arc<Mutex<VideoFrames>>;
+// How to do this ?
+// Vec <FrameMap?>
+// HashMap ?
+// Use Timestamp as a Key ?
+// Check All frames are written ?
+
+#[derive(Clone)]
+pub struct FrameMap {
+    input_frame: frame::Video,
+    // Input Frame Type
+    frame_type: picture::Type,
+    // Input Frame Timestamp
+    timestamp: Option<i64>,
+
+    // Option as we are not sure if it has been processed yet or not
+    output_frame: Option<frame::Video>,
+}
+
+type Frames = Vec<FrameMap>;
+type ShareFrames = Arc<Mutex<FramesMap>>;
 
 /// Defines Plugin module instance
 unsafe extern "C" fn create_test_module(
@@ -378,9 +407,8 @@ unsafe extern "C" fn create_test_module(
 ) -> *mut ffi::WasmEdge_ModuleInstanceContext {
     let module_name = "yolo-video-proc";
 
-    let video_frames = VideoFrames {
-        input_frames: Vec::new(),
-        output_frames: Vec::new(),
+    let video_frames = FramesMap {
+        frames: Vec::new(),
         video_info: None,
     };
 
