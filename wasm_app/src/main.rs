@@ -107,6 +107,9 @@ fn process_video(mut filename: String) -> Result<(), ()> {
         )
     };
 
+    println!("Out Code: {}", output_code);
+    println!("Finished: {}", output_filename);
+
     Ok(())
 }
 

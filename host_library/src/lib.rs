@@ -5,6 +5,7 @@ use std::{
 
 mod decode_video;
 mod encode_video;
+mod time;
 
 use ffmpeg::{dictionary, format::Pixel, frame, picture, Codec, Rational};
 

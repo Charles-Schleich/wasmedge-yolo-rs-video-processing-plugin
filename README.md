@@ -17,9 +17,8 @@ Terminal 2:
 <!-- 
 Quick build
 cd wasm_app/ && cargo build --release && cd ../ && cd host_library/ && cargo build --release && cd .. 
-
 -->
 
 #### To run:
 From project root  
-`WASMEDGE_PLUGIN_PATH=/home/charles/we/yolo_ffmpeg_plugin/target/release   wasmedge  ./target/wasm32-wasi/release/wasm_app.wasm` 
+`WASMEDGE_PLUGIN_PATH=/home/charles/we/yolo_ffmpeg_plugin/target   wasmedge  ./target/wasm32-wasi/release/wasm_app.wasm` 
