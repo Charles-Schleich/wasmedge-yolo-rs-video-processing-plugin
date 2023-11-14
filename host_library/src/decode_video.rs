@@ -7,12 +7,27 @@ use ffmpeg::{
     util::frame::video::Video,
 };
 
+use ffmpeg::Error as FFmpegError;
+
+use log::debug;
+
 use crate::{
     AspectRatio, BitRate, FrameMap, FrameRate, Frames, Height, MaxBitRate, VideoInfo, Width,
 };
+#[derive(Debug)]
+pub enum VideoDecoderError {
+    FFMpegError(FFmpegError),
+    CodecError(String),
+}
 
-pub fn dump_frames(filename: &String) -> Result<(Frames, VideoInfo), ffmpeg::Error> {
-    ffmpeg::init().unwrap();
+impl From<FFmpegError> for VideoDecoderError {
+    fn from(value: FFmpegError) -> Self {
+        VideoDecoderError::FFMpegError(value)
+    }
+}
+
+pub fn dump_frames(filename: &String) -> Result<(Frames, VideoInfo), VideoDecoderError> {
+    ffmpeg::init()?;
 
     let mut frame_index = 0;
     let mut frames = Vec::new();
@@ -22,7 +37,7 @@ pub fn dump_frames(filename: &String) -> Result<(Frames, VideoInfo), ffmpeg::Err
     let input_stream_meta_data: dictionary::Owned;
 
     let itcx_number_streams;
-    let decoder_time_base;
+
     let (bitrate, max_bitrate);
 
     match input {
@@ -38,18 +53,18 @@ pub fn dump_frames(filename: &String) -> Result<(Frames, VideoInfo), ffmpeg::Err
             input_stream_meta_data = ictx.metadata().to_owned();
 
             let mut decoder = input.decoder()?.video()?;
-            // TODO no Unwrap
-            decoder_time_base = decoder.time_base().unwrap();
 
-            // TODO: Proper Error handling
-            codec = encoder::find(codec::Id::H264).unwrap();
+            codec = encoder::find(codec::Id::H264).ok_or(VideoDecoderError::CodecError(
+                "Could not Find Codec h264".into(),
+            ))?;
 
-            println!("Decoder Codec");
-            println!("  BitRate {:?}", decoder.bit_rate());
-            println!("  MaxBitRate {:?}", decoder.max_bit_rate());
-            println!("  Codec");
-            println!("      Name  {:?}", codec.name());
-            println!("      Descr {:?}", codec.description());
+            debug!("Decoder Codec");
+            debug!("  BitRate {:?}", decoder.bit_rate());
+            debug!("  MaxBitRate {:?}", decoder.max_bit_rate());
+            debug!("  TimeBase {:?}", decoder.time_base());
+            debug!("  Codec");
+            debug!("      Name  {:?}", codec.name());
+            debug!("      Descr {:?}", codec.description());
 
             // I am wrapping these in Structs so its less likely that I make Type Errors
             bitrate = BitRate(decoder.bit_rate());
@@ -71,13 +86,14 @@ pub fn dump_frames(filename: &String) -> Result<(Frames, VideoInfo), ffmpeg::Err
                 Flags::BILINEAR,
             )?;
 
+            // Closure to process out frames
             let mut receive_and_process_decoded_frames =
                 |decoder: &mut ffmpeg::decoder::Video| -> Result<(), ffmpeg::Error> {
                     let mut decoded_frame = frame::Video::empty();
                     while decoder.receive_frame(&mut decoded_frame).is_ok() {
                         let mut rgb_frame = Video::empty();
                         scaler.run(&decoded_frame, &mut rgb_frame)?;
-                        println!(
+                        debug!(
                             "R_Frame {frame_index} : {:?} {:?} {:?} {:?} ",
                             decoded_frame.kind(),
                             decoded_frame.timestamp(),
@@ -98,9 +114,11 @@ pub fn dump_frames(filename: &String) -> Result<(Frames, VideoInfo), ffmpeg::Err
                     Ok(())
                 };
 
-            for res in ictx.packets() {
+            // Iterator over Input Context Packets
+            for (idx, res) in ictx.packets().enumerate() {
                 let (stream, packet) = res?;
                 if stream.index() == video_stream_index {
+                    debug!("PKT {idx} PTS{:?}   DTS:{:?}", packet.pts(), packet.dts());
                     decoder.send_packet(&packet)?;
                     receive_and_process_decoded_frames(&mut decoder)?;
                 }
@@ -108,7 +126,7 @@ pub fn dump_frames(filename: &String) -> Result<(Frames, VideoInfo), ffmpeg::Err
             decoder.send_eof()?;
             receive_and_process_decoded_frames(&mut decoder)?;
         }
-        Err(err) => return Err(err),
+        Err(err) => return Err(VideoDecoderError::from(err)),
     };
 
     let video_info = VideoInfo {
@@ -120,7 +138,6 @@ pub fn dump_frames(filename: &String) -> Result<(Frames, VideoInfo), ffmpeg::Err
         frame_rate,
         input_stream_meta_data,
         itcx_number_streams,
-        decoder_time_base,
         bitrate,
         max_bitrate,
     };

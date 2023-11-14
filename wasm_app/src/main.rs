@@ -1,5 +1,5 @@
 use image::{GenericImage, ImageBuffer, Rgb};
-use log::debug;
+use log::{debug, info};
 
 mod plugin {
     use crate::{FramesCount, HostResultType};
@@ -38,7 +38,7 @@ type FramesCount = i32;
 type HostResultType = i32; // Can correspond 0 to okay, and num>0 to the equivalent of an error enum
 
 fn process_video(mut filename: String) -> Result<(), ()> {
-    println!("Start Proc Video");
+    debug!("Start Proc Video");
 
     let (mut width, mut height): (u32, u32) = (0, 0);
     let width_ptr = std::ptr::addr_of_mut!(width);
@@ -69,7 +69,7 @@ fn process_video(mut filename: String) -> Result<(), ()> {
     debug!("HEIGHT {}", height);
     debug!("Number of Frames {}", num_frames);
 
-    println!("Start iter over frames: {}", num_frames);
+    info!("# frames to Process: {}", num_frames);
     for idx in 0..num_frames {
         debug!("------ Run for frame {}", idx);
         let mut image_buf: Vec<u8> = vec![0; image_buf_size];
@@ -85,20 +85,20 @@ fn process_video(mut filename: String) -> Result<(), ()> {
             unsafe { plugin::get_frame(idx, buf_ptr_raw, buf_len, buf_capacity) };
             let mut image_buf: ImageBuffer<image::Rgb<u8>, Vec<u8>> =
                 ImageBuffer::from_vec(width, height, image_buf).unwrap();
-            let res_r = image_buf.copy_from(&red_square, 0, 0);
-            let res_b = image_buf.copy_from(&blue_square, 64, 64);
+            let _ = image_buf.copy_from(&red_square, 0, 0);
+            let _ = image_buf.copy_from(&blue_square, 64, 64);
 
             unsafe { plugin::write_frame(idx, buf_ptr_raw, buf_len) };
         }
     }
-    println!("Finished Writing Frames {:?}", num_frames);
+    info!("Finished Writing Frames {:?}", num_frames);
 
     // let mut output_filename: String = format!("video_output.mp4");
     let mut out: Vec<&str> = filename.split(".").collect::<Vec<&str>>();
     out.insert(0, "./");
     out.insert(out.len() - 1, "_out.");
     let mut output_filename = out.join("");
-    println!("Output Filename {}", output_filename);
+    debug!("Output Filename {}", output_filename);
     let output_code = unsafe {
         plugin::assemble_output_frames_to_video(
             output_filename.as_mut_ptr() as usize as i32,
@@ -107,13 +107,14 @@ fn process_video(mut filename: String) -> Result<(), ()> {
         )
     };
 
-    println!("Out Code: {}", output_code);
-    println!("Finished: {}", output_filename);
+    debug!("Out Code: {}", output_code);
+    debug!("Finished: {}", output_filename);
 
     Ok(())
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // process_video("./1080p60.mp4".to_string()).unwrap();
     // process_video("./ts_wide.mp4".to_string()).unwrap();
     // process_video("./times_square.mp4".to_string()).unwrap();
     process_video("small_bunny_1080p_60fps.mp4".to_string()).unwrap();
