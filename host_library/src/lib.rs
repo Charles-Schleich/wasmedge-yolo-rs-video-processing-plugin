@@ -12,6 +12,7 @@ use ffmpeg::{
     Codec, Rational,
 };
 
+use simplelog::{ColorChoice, CombinedLogger, Config, TermLogger, TerminalMode};
 use wasmedge_sdk::{
     error::HostFuncError,
     host_function,
@@ -21,7 +22,7 @@ use wasmedge_sdk::{
 
 use std::fmt::Debug;
 
-use log::{debug, error};
+use log::{debug, error, LevelFilter};
 
 #[derive(Debug, Copy, Clone)]
 pub struct Width(pub u32);
@@ -105,10 +106,47 @@ impl VideoInfo {
 }
 
 #[host_function]
+fn init_plugin_logging(
+    caller: Caller,
+    args: Vec<WasmValue>,
+    data: &mut Arc<Mutex<FramesMap>>,
+) -> Result<Vec<WasmValue>, HostFuncError> {
+    let log_level_ptr = args[0].to_i32() as *mut i32;
+
+    let mut main_memory = caller
+        .memory(0)
+        .expect("Could not unlock Mutex for State Data stored in Plugin");
+
+    let log_level_main_memory = main_memory
+        .data_pointer_mut(log_level_ptr as u32, 1)
+        .expect("Could not get Data pointer log_level_main_memory");
+
+    let log_level = match unsafe { *log_level_main_memory } {
+        0 => LevelFilter::Off,
+        1 => LevelFilter::Error,
+        2 => LevelFilter::Warn,
+        3 => LevelFilter::Info,
+        4 => LevelFilter::Debug,
+        _ => LevelFilter::Trace,
+    };
+
+    if let Err(err) = CombinedLogger::init(vec![TermLogger::new(
+        log_level,
+        Config::default(),
+        TerminalMode::Mixed,
+        ColorChoice::Always,
+    )]) {
+        eprintln!("Could not Initialize Plugin Logging {}", err);
+    };
+
+    return Ok(vec![WasmValue::from_i32(0)]);
+}
+
+#[host_function]
 fn load_video_to_host_memory(
     caller: Caller,
     args: Vec<WasmValue>,
-    data: &mut Arc<Mutex<FramesMap>>, // data: &mut Frames,
+    data: &mut Arc<Mutex<FramesMap>>,
 ) -> Result<Vec<WasmValue>, HostFuncError> {
     debug!("Load_video");
 
@@ -126,6 +164,7 @@ fn load_video_to_host_memory(
 
     let width_ptr = args[3].to_i32() as *mut i32;
     let height_ptr = args[4].to_i32() as *mut i32;
+    let frames_ptr = args[5].to_i32() as *mut i32;
 
     // TODO: Proper error handling with Expects
     let width_ptr_main_memory = main_memory
@@ -136,6 +175,11 @@ fn load_video_to_host_memory(
         .data_pointer_mut(height_ptr as u32, 1)
         .expect("Could not get Data pointer height_ptr_main_memory")
         as *mut u32;
+    let frames_ptr_main_memory = main_memory
+        .data_pointer_mut(frames_ptr as u32, 1)
+        .expect("Could not get Data pointer height_ptr_main_memory")
+        as *mut u32;
+
     let filename_ptr_main_memory = main_memory
         .data_pointer_mut(filename_ptr as u32, filename_len as u32)
         .expect("Could not get Data pointer filename_ptr_main_memory");
@@ -158,23 +202,27 @@ fn load_video_to_host_memory(
                     *width_ptr_main_memory = frames[0].input_frame.width();
                     *height_ptr_main_memory = frames[0].input_frame.height();
                 }
+            } else {
+                error!("Video file {} contained No Frames", filename);
+                return Err(HostFuncError::User(1));
             }
 
-            // *(data_guard) = frames;
             let mut vid_gaurd = data_guard;
             vid_gaurd.video_info = Some(video_info);
             vid_gaurd.frames = frames;
-
-            Ok(vec![WasmValue::from_i32(vid_gaurd.frames.len() as i32)])
+            unsafe {
+                *frames_ptr_main_memory = vid_gaurd.frames.len() as u32;
+            }
+            Ok(vec![WasmValue::from_i32(0)])
         }
         Err(err) => {
-            // TODO Write to Error Pointer
-            error!("{:?}", err);
+            error!("Error Loading Frames {:?}", err);
             Err(HostFuncError::User(1))
         }
     };
 
-    std::mem::forget(filename); // Need to forget x otherwise we get a double free
+    // Need to forget x otherwise we get a double free
+    std::mem::forget(filename);
     res
 }
 
@@ -217,8 +265,9 @@ fn get_frame(
         error!("Return error if frame does not exist");
     };
 
-    std::mem::forget(vec); // Need to forget x otherwise we get a double free
-    Ok(vec![WasmValue::from_i32(1)])
+    // Need to forget x otherwise we get a double free
+    std::mem::forget(vec);
+    Ok(vec![WasmValue::from_i32(0)])
 }
 
 #[host_function]
@@ -277,18 +326,16 @@ fn write_frame(
 
     debug!("Writing Frame {idx}");
 
-    // if idx % data_guard.frames.len() == 0 {
-    //     println!("{}", data_guard.frames.len() / idx+1);
-    // }
-
     if let Some(frame_map) = data_guard.frames.get_mut(idx) {
         frame_map.output_frame = Some(video_frame);
     } else {
-        std::mem::forget(vec); // Need to forget x otherwise we get a double free
+        // Need to forget x otherwise we get a double free
+        std::mem::forget(vec);
         return Ok(vec![WasmValue::from_i32(1)]);
     };
 
-    std::mem::forget(vec); // Need to forget x otherwise we get a double free
+    // Need to forget x otherwise we get a double free
+    std::mem::forget(vec);
     Ok(vec![WasmValue::from_i32(0)])
 }
 
@@ -340,7 +387,6 @@ fn assemble_output_frames_to_video(
     );
 
     if missing_frames.len() > 0 {
-        // TODO: Return correct Error stating missing frames based on Error enum
         error!("ERROR MISSING FRAMES {:?} ", missing_frames);
         return Err(HostFuncError::User(1));
     }
@@ -349,12 +395,12 @@ fn assemble_output_frames_to_video(
         .map_err(|_| HostFuncError::User(1))?;
 
     if let Err(err) = video_encoder.receive_and_process_decoded_frames(&mut frames) {
-        error!("Encode stream ERROR {:?}", err);
+        error!("Encode stream Error {:?}", err);
     };
 
-    std::mem::forget(output_file); // Need to forget x otherwise we get a double free
-
-    Ok(vec![WasmValue::from_i32(1)])
+    // Need to forget x otherwise we get a double free
+    std::mem::forget(output_file);
+    Ok(vec![WasmValue::from_i32(0)])
 }
 
 #[derive(Clone)]
@@ -390,12 +436,14 @@ unsafe extern "C" fn create_test_module(
 
     let video_frames_arc = Box::new(Arc::new(Mutex::new(video_frames)));
 
-    // TODO Wrap i32's in Struct to avoid misuse / mixups
     type Width = i32;
     type Height = i32;
+    type Frames = i32;
 
     let plugin_module = PluginModuleBuilder::<NeverType>::new()
-        .with_func::<(i32, i32, i32, Width, Height), i32, ShareFrames>(
+        .with_func::<i32, i32, ()>("init_plugin_logging", init_plugin_logging, None)
+        .expect("failed to create init_plugin_logging host function")
+        .with_func::<(i32, i32, i32, Width, Height, Frames), i32, ShareFrames>(
             "load_video_to_host_memory",
             load_video_to_host_memory,
             Some(video_frames_arc.clone()),

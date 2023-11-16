@@ -29,6 +29,4 @@ image = { version = "0.24.7", default-features = false, features = [
     "dds",
     "farbfeld",
 ] }
-
-# TODO DELETE NDARRAY 
-ndarray = { version = "0.15" }
+simplelog = "0.12.1"

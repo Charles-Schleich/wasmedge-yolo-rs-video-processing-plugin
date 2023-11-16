@@ -22,3 +22,8 @@ cd wasm_app/ && cargo build --release && cd ../ && cd host_library/ && cargo bui
 #### To run:
 From project root  
 `WASMEDGE_PLUGIN_PATH=/home/charles/we/yolo_ffmpeg_plugin/target   wasmedge  ./target/wasm32-wasi/release/wasm_app.wasm` 
+
+
+TODO:
+Mention that wasmedge is required.
+

@@ -21,3 +21,5 @@ image = { version = "0.24.7", default-features = false, features = [
     "dds",
     "farbfeld",
 ]}
+prgrs = "0.6.4"
+simplelog = "0.12.1"

@@ -174,9 +174,9 @@ impl VideoEncoder {
 
         // Leaving this here should i want to try reorder the packets again in the futue
         // while let Some((k, mut packet)) = self.packet_order_map.pop_first() {
-        //     println!("Writing Packet {:?}", k);
+        //     debug!("Writing Packet {:?}", k);
         //     self.write_encoded_packets(&mut packet, 0);
-        // }
+        // }https://www.youtube.com/watch?v=alrFbY5vxt4
 
         self.finish()?;
 
