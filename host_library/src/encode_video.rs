@@ -43,7 +43,7 @@ pub(crate) struct VideoEncoder {
 }
 
 impl VideoEncoder {
-    pub fn new(v_info: VideoInfo, output_file: &String) -> Result<Self, VideoEncoderError> {
+    pub fn new(v_info: &VideoInfo, output_file: &String) -> Result<Self, VideoEncoderError> {
         let mut octx = format::output(&output_file)?;
 
         let global_header = octx.format().flags().contains(format::Flags::GLOBAL_HEADER);
@@ -78,7 +78,7 @@ impl VideoEncoder {
             encoder.set_flags(codec::Flags::GLOBAL_HEADER);
         }
 
-        octx.set_metadata(v_info.input_stream_meta_data);
+        octx.set_metadata(v_info.input_stream_meta_data.clone());
         format::context::output::dump(&octx, 0, Some(&output_file));
         octx.write_header()?;
 

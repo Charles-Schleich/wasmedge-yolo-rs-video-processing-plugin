@@ -17,7 +17,7 @@ use wasmedge_sdk::{
     error::HostFuncError,
     host_function,
     plugin::{ffi, PluginDescriptor, PluginModuleBuilder, PluginVersion},
-    Caller, NeverType, WasmValue,
+    Caller, Memory, NeverType, WasmValue,
 };
 
 use std::fmt::Debug;
@@ -109,17 +109,13 @@ impl VideoInfo {
 fn init_plugin_logging(
     caller: Caller,
     args: Vec<WasmValue>,
-    data: &mut Arc<Mutex<FramesMap>>,
+    _data: &mut Arc<Mutex<FramesMap>>,
 ) -> Result<Vec<WasmValue>, HostFuncError> {
     let log_level_ptr = args[0].to_i32() as *mut i32;
 
-    let mut main_memory = caller
-        .memory(0)
-        .expect("Could not unlock Mutex for State Data stored in Plugin");
+    let mut main_memory = caller.memory(0).ok_or(HostFuncError::User(1))?;
 
-    let log_level_main_memory = main_memory
-        .data_pointer_mut(log_level_ptr as u32, 1)
-        .expect("Could not get Data pointer log_level_main_memory");
+    let log_level_main_memory = main_memory.try_get_ptr::<u32>(log_level_ptr as u32, 1)?;
 
     let log_level = match unsafe { *log_level_main_memory } {
         0 => LevelFilter::Off,
@@ -142,6 +138,22 @@ fn init_plugin_logging(
     return Ok(vec![WasmValue::from_i32(0)]);
 }
 
+trait TryGetPointer {
+    fn try_get_ptr<T>(&mut self, offset: u32, len: u32) -> Result<*mut T, HostFuncError>;
+}
+
+impl TryGetPointer for Memory {
+    fn try_get_ptr<T>(&mut self, offset: u32, len: u32) -> Result<*mut T, HostFuncError> {
+        match self.data_pointer_mut(offset as u32, len) {
+            Ok(x) => Ok(x as *mut T),
+            Err(err) => {
+                error!("Error Getting Value from Pointer {}", err);
+                Err(HostFuncError::User(1))
+            }
+        }
+    }
+}
+
 #[host_function]
 fn load_video_to_host_memory(
     caller: Caller,
@@ -150,13 +162,15 @@ fn load_video_to_host_memory(
 ) -> Result<Vec<WasmValue>, HostFuncError> {
     debug!("Load_video");
 
-    let data_guard = data
-        .lock()
-        .expect("Could not unlock Mutex for State Data stored in Plugin");
+    let data_guard = match data.lock() {
+        Ok(x) => x,
+        Err(err) => {
+            error!("Mutex Carrying plugin Data Poisoned {err}");
+            return Err(HostFuncError::Runtime(1));
+        }
+    };
 
-    let mut main_memory = caller
-        .memory(0)
-        .expect("Could not unlock Mutex for State Data stored in Plugin");
+    let mut main_memory = caller.memory(0).ok_or(HostFuncError::User(1))?;
 
     let filename_ptr = args[0].to_i32();
     let filename_len = args[1].to_i32();
@@ -166,23 +180,12 @@ fn load_video_to_host_memory(
     let height_ptr = args[4].to_i32() as *mut i32;
     let frames_ptr = args[5].to_i32() as *mut i32;
 
-    // TODO: Proper error handling with Expects
-    let width_ptr_main_memory = main_memory
-        .data_pointer_mut(width_ptr as u32, 1)
-        .expect("Could not get Data pointer width_ptr_main_memory")
-        as *mut u32;
-    let height_ptr_main_memory = main_memory
-        .data_pointer_mut(height_ptr as u32, 1)
-        .expect("Could not get Data pointer height_ptr_main_memory")
-        as *mut u32;
-    let frames_ptr_main_memory = main_memory
-        .data_pointer_mut(frames_ptr as u32, 1)
-        .expect("Could not get Data pointer height_ptr_main_memory")
-        as *mut u32;
+    let width_ptr_main_memory = main_memory.try_get_ptr::<u32>(width_ptr as u32, 1)?;
+    let height_ptr_main_memory = main_memory.try_get_ptr::<u32>(height_ptr as u32, 1)?;
+    let frames_ptr_main_memory = main_memory.try_get_ptr::<u32>(frames_ptr as u32, 1)?;
 
-    let filename_ptr_main_memory = main_memory
-        .data_pointer_mut(filename_ptr as u32, filename_len as u32)
-        .expect("Could not get Data pointer filename_ptr_main_memory");
+    let filename_ptr_main_memory =
+        main_memory.try_get_ptr::<u8>(filename_ptr as u32, filename_len as u32)?;
 
     let filename: String = unsafe {
         String::from_raw_parts(
@@ -234,13 +237,15 @@ fn get_frame(
 ) -> Result<Vec<WasmValue>, HostFuncError> {
     debug!("get_frame");
 
-    let data_guard = data
-        .lock()
-        .expect("Could not unlock Mutex for State Data stored in Plugin");
+    let data_guard = match data.lock() {
+        Ok(x) => x,
+        Err(err) => {
+            error!("Mutex Carrying plugin Data Poisoned {err}");
+            return Err(HostFuncError::Runtime(1));
+        }
+    };
 
-    let mut main_memory = caller
-        .memory(0)
-        .expect("Could not unlock Mutex for State Data stored in Plugin");
+    let mut main_memory = caller.memory(0).ok_or(HostFuncError::User(1))?;
 
     let idx: i32 = args[0].to_i32();
     let image_buf_ptr = args[1].to_i32();
@@ -278,13 +283,15 @@ fn write_frame(
 ) -> Result<Vec<WasmValue>, HostFuncError> {
     debug!("write_frame");
 
-    let mut data_guard = data
-        .lock()
-        .expect("Could not unlock Mutex for State Data stored in Plugin");
+    let mut data_guard = match data.lock() {
+        Ok(x) => x,
+        Err(err) => {
+            error!("Mutex Carrying plugin Data Poisoned {err}");
+            return Err(HostFuncError::Runtime(1));
+        }
+    };
 
-    let mut main_memory = caller
-        .memory(0)
-        .expect("Could not unlock Mutex for State Data stored in Plugin");
+    let mut main_memory = caller.memory(0).ok_or(HostFuncError::User(1))?;
 
     let video_info = data_guard
         .video_info
@@ -295,7 +302,6 @@ fn write_frame(
     let image_buf_ptr = args[1].to_i32();
     let image_buf_len = args[2].to_i32() as usize;
 
-    // TODO proper Handling of errors
     let image_ptr_wasm_memory = main_memory
         .data_pointer_mut(image_buf_ptr as u32, image_buf_len as u32)
         .expect("Could not get Data pointer");
@@ -346,17 +352,32 @@ fn assemble_output_frames_to_video(
     data: &mut Arc<Mutex<FramesMap>>,
 ) -> Result<Vec<WasmValue>, HostFuncError> {
     debug!("assemble_video");
-    let mut data_mg = data.lock().unwrap();
-    let mut main_memory = caller.memory(0).unwrap();
+    let mut data_guard = match data.lock() {
+        Ok(x) => x,
+        Err(err) => {
+            error!("Mutex Carrying plugin Data Poisoned {err}");
+            return Err(HostFuncError::Runtime(1));
+        }
+    };
+
+    let mut main_memory = caller.memory(0).ok_or(HostFuncError::Runtime(1))?;
 
     let filename_ptr = args[0].to_i32();
     let filename_len = args[1].to_i32();
     let filaname_capacity = args[2].to_i32();
 
     // TODO proper Handling of errors
-    let filename_ptr_main_memory = main_memory
-        .data_pointer_mut(filename_ptr as u32, filename_len as u32)
-        .expect("Could not get Data pointer");
+    let filename_ptr_main_memory = main_memory.try_get_ptr::<u8>(filename_ptr as u32, 1)?;
+
+    let video_struct = &mut (*data_guard);
+    let frames = &mut video_struct.frames;
+    let video_info = match &video_struct.video_info {
+        Some(video_info) => video_info,
+        None => {
+            error!("No Video Information when attempting to Assemble output assemble_output_frames_to_video");
+            return Err(HostFuncError::User(1));
+        }
+    };
 
     let output_file: String = unsafe {
         String::from_raw_parts(
@@ -365,10 +386,6 @@ fn assemble_output_frames_to_video(
             filaname_capacity as usize,
         )
     };
-
-    let video_struct = &mut (*data_mg);
-    let frames = &mut video_struct.frames;
-    let video_info = video_struct.video_info.clone().unwrap();
 
     // Check Frames have all been Written
     // Save Indexes of frames that have not been written
@@ -387,11 +404,11 @@ fn assemble_output_frames_to_video(
     );
 
     if missing_frames.len() > 0 {
-        error!("ERROR MISSING FRAMES {:?} ", missing_frames);
+        error!("Error Missing Frames {:?} ", missing_frames);
         return Err(HostFuncError::User(1));
     }
 
-    let mut video_encoder = encode_video::VideoEncoder::new(video_info, &output_file)
+    let mut video_encoder = encode_video::VideoEncoder::new(&video_info, &output_file)
         .map_err(|_| HostFuncError::User(1))?;
 
     if let Err(err) = video_encoder.receive_and_process_decoded_frames(&mut frames) {
