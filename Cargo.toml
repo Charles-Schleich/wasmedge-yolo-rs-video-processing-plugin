@@ -1,4 +1,43 @@
-[workspace]
-members = ["host_library", "wasm_app"]
+[package]
+name = "host_library"
+version = "0.1.0"
+edition = "2021"
+# forced-target = "wasm32-unknown-unknown"
 
-workspace.resolver = 2
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[[example]]
+path = "./examples/wasm_app.rs"
+name = "wasm_app"
+target = "wasm32-wasi"
+
+[dependencies]
+log = "0.4.20"
+image = { version = "0.24.7", default-features = false, features = [
+    "gif",
+    "jpeg",
+    "ico",
+    "png",
+    "pnm",
+    "tga",
+    "tiff",
+    "webp",
+    "bmp",
+    "hdr",
+    "dxt",
+    "dds",
+    "farbfeld",
+] }
+simplelog = "0.12.1"
+prgrs = "0.6.4"
+
+
+# ['cfg(not(target = "wasm32-wasi"))'.dependencies]
+# [target.]
+# ['cfg(not(target_arch = "wasm32-wasi"))'.dependencies]
+ffmpeg = { version = "0.6.0", features = [
+    "ffmpeg_5_0",
+], git = "https://github.com/meh/rust-ffmpeg" }
+wasmedge-sdk = { version = "0.12.1", features = ["ffi", "standalone"] }

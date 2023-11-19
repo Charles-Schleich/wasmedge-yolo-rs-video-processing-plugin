@@ -9,10 +9,9 @@ Using FFMPEG for native video processing.
 Build `host_library` and `wasm_app` in separate terminals
 
 #### To build:
-Terminal 1:  
-`cd host_library && cargo build --release`  
+
 Terminal 2:  
-`cd wasm_app && cargo build --release`  
+`cargo build --release`  
 
 <!-- 
 Quick build
